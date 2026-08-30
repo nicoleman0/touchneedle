@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The version number has a single source of truth: `__version__` in
+  `scripts/touchneedle.py`. `scripts/sync-plugin-skill.sh` now stamps it into
+  the `SKILL.md` frontmatter and the plugin manifest instead of checking three
+  hand-maintained numbers agree, so a release bump is one line plus the sync
+  script.
+
 ## [0.1.0] — 2026-08-30
 
 First public release. The checker was written and used to verify the
