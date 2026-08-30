@@ -460,5 +460,64 @@ class TestMlaFixtureEndToEnd(unittest.TestCase):
         self.assertEqual(worklist.count("- **Verdict**:"), 7)
 
 
+class TestFindNoteCitations(unittest.TestCase):
+    def test_footnote_markers_are_found_with_context(self):
+        cites = cc.find_note_citations(
+            "One sentence. The claim appears here.[^3] Another sentence.")
+        self.assertEqual(len(cites), 1)
+        self.assertEqual(cites[0].number, 3)
+        self.assertEqual(cites[0].form, "note")
+        self.assertIn("The claim appears here", cites[0].context)
+        self.assertNotIn("One sentence", cites[0].context)
+
+
+class TestNotesFixtureEndToEnd(unittest.TestCase):
+    """The notes fixture, in the shape pandoc produces from a .docx: a full
+    citation first, shortened repeats, an Ibid., an organisation, and a
+    bibliography that already lists one cited work."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.refs, cls.cites, cls.style = cc.collect(
+            os.path.join(FIXTURES, "sample-notes.md"))
+
+    def test_style_is_detected_as_notes(self):
+        self.assertEqual(self.style, "notes")
+
+    def test_every_marker_is_a_citation(self):
+        self.assertEqual(len(self.cites), 6)
+        self.assertTrue(all(c.form == "note" for c in self.cites))
+
+    def test_the_bibliography_work_cited_by_note_one_is_not_duplicated(self):
+        # Note 1 is the full Greshake citation and the bibliography already
+        # lists it: one entry, not two.
+        keys = [r.key for r in self.refs]
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertEqual(len([r for r in self.refs if "greshake" in r.key]), 1)
+
+    def test_shortened_and_ibid_notes_resolve_to_the_full_citation(self):
+        keys = {c.number: c.key for c in self.cites}
+        self.assertEqual(keys[1], keys[4])
+        self.assertEqual(keys[1], keys[5])
+
+    def test_new_entries_from_notes_route_correctly(self):
+        kinds = {r.key: r.kind for r in self.refs}
+        self.assertEqual(kinds["edoardo debenedetti jiace zhang and nicholas "
+                               "carlini|2024"], "arxiv")
+        self.assertEqual(kinds["internet engineering task force|2025"], "ietf-draft")
+
+    def test_uncited_entries_are_identified(self):
+        uncited = sorted(r.key for r in self.refs if not r.cited_by)
+        self.assertEqual(uncited, ["hou|2025", "uncited|2021"])
+
+    def test_orphan_marker_is_left_unresolved(self):
+        orphans = [c.number for c in self.cites if not c.key]
+        self.assertEqual(orphans, [9])
+
+    def test_the_repeated_work_is_cited_three_times_through_notes(self):
+        greshake = [r for r in self.refs if "greshake" in r.key][0]
+        self.assertEqual(greshake.cited_by.count("note"), 3)
+
+
 if __name__ == "__main__":
     unittest.main()

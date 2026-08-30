@@ -170,6 +170,41 @@ class TestMlaDocument(unittest.TestCase):
         self.assertIn("`Smith 42`", section)
 
 
+class TestNotesDocument(unittest.TestCase):
+    """End-to-end over the footnotes fixture, offline."""
+
+    def test_check_reports_the_expected_totals_and_style(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            proc = run("check", os.path.join(FIXTURES, "sample-notes.md"),
+                       "--offline", "--out", out,
+                       "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("5 reference entries, 6 in-text citation instances.", report)
+        self.assertIn("Style: notes (detected)", report)
+
+    def test_the_orphan_marker_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            run("check", os.path.join(FIXTURES, "sample-notes.md"),
+                "--offline", "--out", out, "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        section = report.split("### In-text citations with no matching")[1]
+        self.assertIn("`[9]`", section)
+
+    def test_claims_rows_carry_the_sentence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "claims.md")
+            run("claims", os.path.join(FIXTURES, "sample-notes.md"), "--out", out)
+            with open(out, encoding="utf-8") as fh:
+                worklist = fh.read()
+        self.assertEqual(worklist.count("- **Verdict**:"), 6)
+        self.assertIn("Prompt injection was characterised", worklist)
+
+
 class TestClaimsCommand(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

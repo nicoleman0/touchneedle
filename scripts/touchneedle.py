@@ -199,14 +199,16 @@ def split_entries(block: str, allow_yearless: bool = False) -> list[str]:
 STYLES = ("author-date", "numeric", "mla", "notes")
 
 
-def detect_style(body: str, block: str, heading: str = "") -> str:
+def detect_style(body: str, block: str, heading: str = "",
+                 notes: dict[int, str] | None = None) -> str:
     """Infer the document's citation style from shape, not first impression.
 
     Follows split_document's philosophy: a candidate only wins if the
     entries under it actually parse. A numbered list whose body carries more
     bracket markers than author-year parentheticals is numeric; a numbered
-    list cited author-date is still author-date. A Works Cited heading with
-    author-page parentheticals in the body is MLA.
+    list cited author-date is still author-date. Footnote definitions whose
+    notes read like citations make a notes document; a Works Cited heading
+    with author-page parentheticals in the body is MLA.
     """
     allow_yearless = bool(YEARLESS_HEADING.search(heading))
     entries = split_entries(block, allow_yearless)
@@ -217,6 +219,13 @@ def detect_style(body: str, block: str, heading: str = "") -> str:
                     + len(SUPERSCRIPT_RUN.findall(text)))
         if brackets > len(PAREN.findall(text)):
             return "numeric"
+    if notes:
+        # Aside footnotes ('[^1]: a clarification, really') are not citations;
+        # require most definitions to read like one before claiming notes.
+        citationish = sum(1 for d in notes.values()
+                          if QUOTED.search(d) or ANY_YEAR.search(d))
+        if citationish >= max(2, len(notes) // 2) and NOTE_REF.search(strip_code(body)):
+            return "notes"
     if "works cited" in heading.lower() and find_mla_citations(strip_code(body)):
         return "mla"
     return "author-date"
@@ -623,6 +632,116 @@ def find_mla_citations(body: str) -> list[Citation]:
     return out
 
 
+# Footnote markers in the body and their definitions at the end. pandoc turns
+# .docx footnotes into exactly this shape: 'text[^1] more' in the body and
+# '[^1]: the note' blocks at the end, indented continuation lines included.
+NOTE_REF = re.compile(r"\[\^(\d{1,3})\]")
+NOTE_DEF = re.compile(r"(?m)^\[\^(\d{1,3})\]:[ \t]*([^\n]*(?:\n[ \t]+\S[^\n]*)*)")
+IBID = re.compile(r"^ibid\b", re.I)
+
+
+def harvest_notes(text: str) -> tuple[str, dict[int, str]]:
+    """Pull '[^n]: definition' footnote blocks out of the text.
+
+    Returns (text without the definitions, note number -> note text). The
+    definitions leave the text before the reference list is looked for, so
+    they can never be glued onto a bibliography entry.
+    """
+    notes: dict[int, str] = {}
+    spans: list[tuple[int, int]] = []
+    for m in NOTE_DEF.finditer(text):
+        notes.setdefault(int(m.group(1)), clean(m.group(2)))
+        spans.append((m.start(), m.end()))
+    for start, end in reversed(spans):
+        text = text[:start] + text[end:]
+    return text, notes
+
+
+def find_note_citations(body: str) -> list[Citation]:
+    """Footnote markers in the body, one citation per marker."""
+    return [Citation("", "", "", "note", context(body, m.start()),
+                     number=int(m.group(1)))
+            for m in NOTE_REF.finditer(body)]
+
+
+def note_surname(text: str) -> str:
+    """First surname in a note, inverted ('Greshake, Kai,') or natural
+    ('Kai Greshake,'). A one-token head is an inverted surname; a multi-token
+    head with no comma inside it is a given name plus surname."""
+    before_title = re.split(r"[\u2018'\"\u201c]", text, maxsplit=1)[0]
+    head = before_title.split(",")[0].strip()
+    tokens = head.split()
+    if len(tokens) == 1:
+        return tokens[0]
+    return tokens[-1]
+
+
+def is_short_note(ref: Reference) -> bool:
+    """A Chicago/MHRA shortened note: author, short title, page -- no year,
+    nothing checkable, and short."""
+    return (bool(ref.title) and not ref.year
+            and not (ref.doi or ref.arxiv or ref.rfc or ref.draft or ref.url)
+            and len(ref.raw) < 90)
+
+
+def find_note_target(ref: Reference, pool: list[Reference]) -> Reference | None:
+    """The entry a note cites, if one is already in hand: same surname and a
+    title that matches outright, or that the full title starts with -- a
+    shortened note quotes the first words of the title, and a similarity
+    score alone would call 'Not What' and 'Not What You've Signed Up For' a
+    poor match."""
+    surname = normalise(note_surname(ref.raw))
+    if not surname or not ref.title:
+        return None
+    for cand in pool:
+        if not cand.title or surname not in normalise(cand.name):
+            continue
+        full, short = normalise(cand.title), normalise(ref.title)
+        if (title_score(ref.title, cand.title) >= 0.60
+                or full.startswith(short) or short.startswith(full)):
+            return cand
+    return None
+
+
+def build_note_refs(notes: dict[int, str], bib: list[Reference]
+                    ) -> tuple[list[Reference], dict[int, str]]:
+    """Footnote definitions as references.
+
+    A full note becomes an entry unless the bibliography already lists the
+    work; a shortened note or an Ibid. links to the citation it repeats and
+    becomes no entry of its own. Returns (new entries, note number -> key).
+    """
+    out: list[Reference] = []
+    note_map: dict[int, str] = {}
+    last = ""
+    for n in sorted(notes):
+        if IBID.match(notes[n]):
+            # Ibid. repeats whatever the previous note cited.
+            if last:
+                note_map[n] = last
+                continue
+            ref = parse_entry(notes[n])
+            ref.notes.append("Ibid. with no earlier citation to refer to")
+            note_map[n] = ref.key
+            last = ref.key
+            out.append(ref)
+            continue
+        ref = parse_entry(notes[n])
+        ref.number = n
+        target = find_note_target(ref, bib + out)
+        if target:
+            note_map[n] = target.key
+            last = target.key
+            continue
+        if is_short_note(ref):
+            ref.notes.append("shortened note; could not link it to a fuller "
+                             "citation, so verify it against the source")
+        note_map[n] = ref.key
+        last = ref.key
+        out.append(ref)
+    return out, note_map
+
+
 # A sentence ends at .!? followed by whitespace or end of line -- or by a
 # citation marker trailing the sentence it documents, which the boundary then
 # consumes whole so it does not leak into the next context: '... here.^8^',
@@ -679,8 +798,15 @@ def citation_key(name: str, year: str, suffix: str) -> str:
     return f"{n}|{year}{suffix}"
 
 
-def match_citations(refs: list[Reference], cites: list[Citation]) -> list[Citation]:
-    """Attach each in-text citation to a reference where one can be found."""
+def match_citations(refs: list[Reference], cites: list[Citation],
+                    note_map: dict[int, str] | None = None) -> list[Citation]:
+    """Attach each in-text citation to a reference where one can be found.
+
+    Footnote markers resolve through note_map -- note number to the key of
+    the work it cites -- because a shortened note or an Ibid. cites an entry
+    another note already produced, and no number-to-entry table can express
+    that.
+    """
     by_key = {r.key: r for r in refs}
     by_number = {r.number: r for r in refs if r.number}
     by_surname: dict[str, list[Reference]] = {}
@@ -689,6 +815,12 @@ def match_citations(refs: list[Reference], cites: list[Citation]) -> list[Citati
         by_surname.setdefault(first, []).append(r)
 
     for c in cites:
+        if c.form == "note" and note_map is not None:
+            target = by_key.get(note_map.get(c.number, ""))
+            if target:
+                c.key = target.key
+                target.cited_by.append(c.form)
+            continue
         if c.form in ("numeric", "note"):
             # A marker resolves by position or not at all -- no fuzzy matching
             # between a number and a name.
@@ -1236,20 +1368,31 @@ def collect(doc: str, style: str = "auto") -> tuple[list[Reference], list[Citati
     still parsed by whichever grammar fits them, so a forced style changes
     the gates and the in-text finders, not the per-entry dispatch.
     """
-    text = load_text(doc)
-    body, block, heading = split_document(text)
-    effective = style if style in STYLES else detect_style(body, block, heading)
+    text, notes = harvest_notes(load_text(doc))
+    if notes and not (HEADING.search(text) or BARE_HEADING.search(text)):
+        # A notes-only document: the footnotes are the reference list, and
+        # there is no heading to find.
+        body, block, heading = text, "", "Notes"
+    else:
+        body, block, heading = split_document(text)
+    effective = style if style in STYLES else detect_style(body, block, heading, notes)
     allow_yearless = bool(YEARLESS_HEADING.search(heading))
-    refs = [parse_entry(e) for e in split_entries(block, allow_yearless)]
-    if not refs:
+    refs = [parse_entry(e) for e in split_entries(block, allow_yearless)] if block else []
+    if not refs and not notes:
         sys.exit("error: found a References heading but could not parse any entries under it")
+    note_map: dict[int, str] = {}
+    if effective == "notes" and notes:
+        note_refs, note_map = build_note_refs(notes, refs)
+        refs = refs + note_refs
     body = strip_code(body)
     found = find_citations(body) + find_numeric_citations(body)
     if effective == "mla":
         # Author-page parentheticals are only citations in an MLA document;
         # elsewhere '(Smith 42)' is prose, and finding it would be noise.
         found += find_mla_citations(body)
-    cites = match_citations(refs, found)
+    if note_map:
+        found += find_note_citations(body)
+    cites = match_citations(refs, found, note_map)
     return refs, cites, effective
 
 

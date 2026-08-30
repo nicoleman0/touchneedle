@@ -75,6 +75,27 @@ class TestDetectStyle(unittest.TestCase):
         body, block, heading = cc.split_document(text)
         self.assertEqual(cc.detect_style(body, block, heading), "mla")
 
+    def test_the_notes_fixture_is_detected_as_notes(self):
+        with open(os.path.join(FIXTURES, "sample-notes.md"), encoding="utf-8") as fh:
+            rest, notes = cc.harvest_notes(fh.read())
+        body, block, heading = cc.split_document(rest)
+        self.assertEqual(cc.detect_style(body, block, heading, notes), "notes")
+
+    def test_aside_footnotes_do_not_make_a_notes_document(self):
+        # Definitions that read like clarifications, not citations, keep the
+        # document in whatever style its list and body say.
+        text = (
+            "A term is defined here.[^1]\n\n"
+            "## References\n\n"
+            "Smith, J. (2020) 'A first paper', Journal of Things. doi:10.1/a\n\n"
+            "Jones, K. (2021) 'A second paper', Journal of Things. doi:10.1/b\n\n"
+            "Patel, R. (2022) 'A third paper', Journal of Things. doi:10.1/c\n\n"
+            "[^1]: A clarification of the term, not a citation of anything.\n"
+        )
+        rest, notes = cc.harvest_notes(text)
+        body, block, heading = cc.split_document(rest)
+        self.assertEqual(cc.detect_style(body, block, heading, notes), "author-date")
+
     def test_author_page_parentheticals_alone_do_not_make_mla(self):
         # Without a Works Cited heading, '(Smith 42)' is prose, not an MLA
         # citation, and the document stays author-date.
@@ -511,6 +532,112 @@ class TestYearlessEntryGate(unittest.TestCase):
         # No quoted title, so not an entry however lenient the heading.
         block = "\nThe following list gathers sources consulted during the work.\n"
         self.assertEqual(cc.split_entries(block, True), [])
+
+
+class TestHarvestNotes(unittest.TestCase):
+    def test_definitions_are_extracted_and_removed(self):
+        text = ("Body with a marker.[^1] More body.\n\n"
+                "[^1]: Kai Greshake, \"A paper,\" Venue, 2023.\n")
+        rest, notes = cc.harvest_notes(text)
+        self.assertEqual(notes, {1: 'Kai Greshake, "A paper," Venue, 2023.'})
+        self.assertNotIn("[^1]:", rest)
+        self.assertIn("Body with a marker.[^1] More body.", rest)
+
+    def test_indented_continuation_lines_belong_to_the_note(self):
+        text = ("[^2]: A note whose text wraps\n"
+                "    onto a second line.\n\nUnrelated paragraph.\n")
+        rest, notes = cc.harvest_notes(text)
+        self.assertEqual(notes, {2: "A note whose text wraps onto a second line."})
+        self.assertNotIn("wraps", rest)
+        self.assertIn("Unrelated paragraph.", rest)
+
+    def test_a_repeated_number_keeps_the_first_definition(self):
+        text = "[^1]: First.\n\n[^1]: Second.\n"
+        _, notes = cc.harvest_notes(text)
+        self.assertEqual(notes, {1: "First."})
+
+
+class TestNoteHelpers(unittest.TestCase):
+    def test_inverted_surname(self):
+        self.assertEqual(cc.note_surname('Greshake, Kai, "A paper," Venue.'), "Greshake")
+
+    def test_natural_order_surname(self):
+        self.assertEqual(cc.note_surname('Kai Greshake, "A paper," Venue.'), "Greshake")
+
+    def test_short_form_surname(self):
+        self.assertEqual(cc.note_surname('Greshake, "Not What," 24.'), "Greshake")
+
+    def test_a_shortened_note_is_detected(self):
+        ref = cc.parse_entry('Greshake, "Not What," 24.')
+        self.assertTrue(cc.is_short_note(ref))
+
+    def test_a_full_note_is_not_short(self):
+        ref = cc.parse_entry(
+            'Kai Greshake, "Not What You\'ve Signed Up For," in Proceedings '
+            "of AISec, 2023.")
+        self.assertFalse(cc.is_short_note(ref))
+
+    def test_an_undated_entry_with_a_url_is_not_short(self):
+        ref = cc.parse_entry(
+            'Anthropic. "A specification." https://example.com. Accessed 3 June 2026.')
+        self.assertFalse(cc.is_short_note(ref))
+
+    def test_find_note_target_matches_a_shortened_title_by_prefix(self):
+        full = cc.parse_entry(
+            'Greshake, Kai. "Not What You\'ve Signed Up For: Compromising '
+            'Real-World Applications," AISec, 2023.')
+        short = cc.parse_entry('Greshake, "Not What," 24.')
+        self.assertIs(cc.find_note_target(short, [full]), full)
+
+    def test_find_note_target_refuses_a_different_work(self):
+        full = cc.parse_entry('Greshake, Kai. "A different paper entirely," Venue, 2023.')
+        short = cc.parse_entry('Greshake, "Not What," 24.')
+        self.assertIsNone(cc.find_note_target(short, [full]))
+
+
+class TestBuildNoteRefs(unittest.TestCase):
+    def test_a_full_note_becomes_an_entry(self):
+        notes = {1: 'Kai Greshake, "A paper about things," Venue, 2023.'}
+        refs, note_map = cc.build_note_refs(notes, [])
+        self.assertEqual(len(refs), 1)
+        self.assertEqual(note_map, {1: refs[0].key})
+        self.assertEqual(refs[0].number, 1)
+
+    def test_a_note_already_in_the_bibliography_links_instead(self):
+        bib = [cc.parse_entry(
+            'Greshake, Kai. "Not What You\'ve Signed Up For," AISec, 2023. '
+            "doi:10.1145/3605764.3623985.")]
+        notes = {1: 'Kai Greshake, "Not What You\'ve Signed Up For," '
+                    "in Proceedings of AISec, 2023."}
+        refs, note_map = cc.build_note_refs(notes, bib)
+        self.assertEqual(refs, [])
+        self.assertEqual(note_map, {1: bib[0].key})
+
+    def test_a_shortened_note_links_to_the_full_one(self):
+        notes = {1: 'Kai Greshake, "Not What You\'ve Signed Up For," Venue, 2023.',
+                 2: 'Greshake, "Not What," 24.'}
+        refs, note_map = cc.build_note_refs(notes, [])
+        self.assertEqual(len(refs), 1)
+        self.assertEqual(note_map[2], note_map[1])
+
+    def test_ibid_repeats_the_previous_note(self):
+        notes = {1: 'Kai Greshake, "Not What You\'ve Signed Up For," Venue, 2023.',
+                 2: "Ibid., 25."}
+        refs, note_map = cc.build_note_refs(notes, [])
+        self.assertEqual(len(refs), 1)
+        self.assertEqual(note_map[2], note_map[1])
+
+    def test_an_unlinked_shortened_note_is_kept_with_a_caveat(self):
+        notes = {1: 'Smith, "A short title," 24.'}
+        refs, _ = cc.build_note_refs(notes, [])
+        self.assertEqual(len(refs), 1)
+        self.assertIn("shortened note", refs[0].notes[0])
+
+    def test_a_leading_ibid_is_flagged_rather_than_dropped(self):
+        notes = {1: "Ibid., 25."}
+        refs, _ = cc.build_note_refs(notes, [])
+        self.assertEqual(len(refs), 1)
+        self.assertIn("no earlier citation", refs[0].notes[0])
 
 
 if __name__ == "__main__":
