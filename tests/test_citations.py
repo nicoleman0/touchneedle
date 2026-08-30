@@ -121,7 +121,7 @@ class TestFixtureEndToEnd(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.refs, cls.cites = cc.collect(os.path.join(FIXTURES, "sample.md"))
+        cls.refs, cls.cites, cls.style = cc.collect(os.path.join(FIXTURES, "sample.md"))
 
     def test_every_entry_is_parsed(self):
         self.assertEqual(len(self.refs), 8)

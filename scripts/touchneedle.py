@@ -90,6 +90,18 @@ def clean(s: str) -> str:
     return re.sub(r"\s{2,}", " ", s).strip()
 
 
+FENCE = re.compile(r"(`{3,})[\s\S]*?\1|(~{3,})[\s\S]*?\2")
+INLINE_CODE = re.compile(r"`[^`\n]+`")
+
+
+def strip_code(body: str) -> str:
+    """Drop fenced and inline code before scanning for citations: an array
+    index like arr[1] or a signature like foo(Date, 2020) inside code is not
+    a citation, and in a numeric-style document the false positives would be
+    relentless."""
+    return INLINE_CODE.sub(" ", FENCE.sub(" ", body))
+
+
 TITLES = r"references|bibliography|works cited|reference list"
 HEADING = re.compile(r"^(#{1,4})\s*(?:\d+[.)]?\s*)?(?:" + TITLES + r")\b.*$", re.I | re.M)
 # A .docx whose Word style never mapped to a heading level leaves the word
@@ -147,6 +159,26 @@ def split_entries(block: str) -> list[str]:
 
 
 # --------------------------------------------------------------------------
+# citation-style detection
+# --------------------------------------------------------------------------
+
+# Styles, in the order detect_style() considers them. Each has an entry
+# grammar in parse_entry's dispatch table and an in-text finder; the string
+# is also what --style accepts and what the report prints.
+STYLES = ("author-date", "numeric", "mla", "notes")
+
+
+def detect_style(body: str, block: str) -> str:
+    """Infer the document's citation style from shape, not first impression.
+
+    Follows split_document's philosophy: a candidate only wins if the
+    entries under it actually parse. Recognises author-date only for now;
+    the per-style signals arrive with their parsers.
+    """
+    return "author-date"
+
+
+# --------------------------------------------------------------------------
 # reference parsing
 # --------------------------------------------------------------------------
 
@@ -154,7 +186,9 @@ def split_entries(block: str) -> list[str]:
 class Reference:
     raw: str
     key: str = ""
-    name: str = ""            # first-author surname, or organisation name
+    number: int = 0            # position in a numbered list, 0 when there is none
+    style: str = ""            # parse strategy that produced the entry
+    name: str = ""             # first-author surname, or organisation name
     is_org: bool = False
     year: str = ""
     suffix: str = ""          # the 'a' / 'b' in 2025a
@@ -282,9 +316,11 @@ class Citation:
     name: str
     year: str
     suffix: str
-    form: str                 # 'parenthetical' or 'narrative'
+    form: str                 # 'parenthetical', 'narrative', 'numeric', 'note', ...
     context: str
     key: str = ""
+    number: int = 0           # [n] marker or footnote number
+    page: str = ""            # MLA author-page locator
 
 
 def find_citations(body: str) -> list[Citation]:
@@ -709,7 +745,7 @@ def verify(ref: Reference, f: Fetcher) -> None:
 # --------------------------------------------------------------------------
 
 def build_report(refs: list[Reference], cites: list[Citation], doc: str,
-                 offline: bool) -> str:
+                 offline: bool, style: str = "") -> str:
     counts: dict[str, int] = {}
     for r in refs:
         counts[r.status] = counts.get(r.status, 0) + 1
@@ -721,9 +757,11 @@ def build_report(refs: list[Reference], cites: list[Citation], doc: str,
     L = [f"# Citation check \u2014 {os.path.basename(doc)}", "",
          f"Run {time.strftime('%Y-%m-%d %H:%M')}"
          + ("  \u2014 **offline mode, nothing was verified against a live source**"
-            if offline else ""),
-         "", f"{len(refs)} reference entries, {len(cites)} in-text citation instances.", "",
-         "## Summary", "", "| Status | Count | Meaning |", "|---|---:|---|"]
+            if offline else ""), ""]
+    if style:
+        L += [f"Style: {style}", ""]
+    L += [f"{len(refs)} reference entries, {len(cites)} in-text citation instances.", "",
+          "## Summary", "", "| Status | Count | Meaning |", "|---|---:|---|"]
     meaning = {
         "VERIFIED": "matched an authoritative record",
         "PARTIAL": "found, but the match is loose \u2014 eyeball it",
@@ -846,14 +884,21 @@ def build_claims(refs: list[Reference], cites: list[Citation], doc: str) -> str:
 # entry point
 # --------------------------------------------------------------------------
 
-def collect(doc: str) -> tuple[list[Reference], list[Citation]]:
+def collect(doc: str, style: str = "auto") -> tuple[list[Reference], list[Citation], str]:
+    """Parse a document, returning (references, citations, effective style).
+
+    An explicit style other than 'auto' overrides detection; the entries are
+    still parsed by whichever grammar fits them, so a forced style changes
+    the gates and the in-text finders, not the per-entry dispatch.
+    """
     text = load_text(doc)
     body, block = split_document(text)
+    effective = style if style in STYLES else detect_style(body, block)
     refs = [parse_entry(e) for e in split_entries(block)]
     if not refs:
         sys.exit("error: found a References heading but could not parse any entries under it")
-    cites = match_citations(refs, find_citations(body))
-    return refs, cites
+    cites = match_citations(refs, find_citations(strip_code(body)))
+    return refs, cites, effective
 
 
 def main() -> int:
@@ -865,6 +910,10 @@ def main() -> int:
         p = sub.add_parser(name)
         p.add_argument("doc", help="Markdown or .docx document")
         p.add_argument("--out", help="write the report here instead of stdout")
+        p.add_argument("--style", default="auto", choices=["auto", *STYLES],
+                       help="citation style of the document; the default, auto, "
+                            "infers it from the reference list and the in-text "
+                            "markers")
     chk = sub.choices["check"]
     chk.add_argument("--json", dest="json_out", help="also write machine-readable results")
     chk.add_argument("--offline", action="store_true",
@@ -876,7 +925,8 @@ def main() -> int:
     chk.add_argument("--timeout", type=int, default=25)
 
     args = ap.parse_args()
-    refs, cites = collect(args.doc)
+    refs, cites, style = collect(args.doc, args.style)
+    style_label = f"{style} (forced)" if args.style != "auto" else f"{style} (detected)"
 
     if args.cmd == "claims":
         out = build_claims(refs, cites, args.doc)
@@ -884,14 +934,15 @@ def main() -> int:
         f = Fetcher(args.cache, timeout=args.timeout, offline=args.offline,
                     mailto=args.mailto)
         for i, r in enumerate(refs, 1):
-            print(f"[{i}/{len(refs)}] {r.name} ({r.year}{r.suffix}) \u2026",
+            print(f"[{i}/{len(refs)}] {r.name} ({r.year}{r.suffix}) …",
                   file=sys.stderr, flush=True)
             verify(r, f)
             print(f"    {r.status}", file=sys.stderr, flush=True)
-        out = build_report(refs, cites, args.doc, args.offline)
+        out = build_report(refs, cites, args.doc, args.offline, style_label)
         if args.json_out:
             with open(args.json_out, "w", encoding="utf-8") as fh:
-                json.dump({"references": [dataclasses.asdict(r) for r in refs],
+                json.dump({"style": style,
+                           "references": [dataclasses.asdict(r) for r in refs],
                            "citations": [dataclasses.asdict(c) for c in cites]},
                           fh, indent=2, ensure_ascii=False)
 

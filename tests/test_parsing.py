@@ -20,6 +20,37 @@ class TestClean(unittest.TestCase):
         self.assertEqual(cc.clean("RFC 8259‑bis"), "RFC 8259-bis")
 
 
+class TestStripCode(unittest.TestCase):
+    def test_fenced_and_inline_code_are_removed(self):
+        # Code is the one place where (Smith, 2020) and arr[1] are guaranteed
+        # not to be citations, so it never reaches the finders.
+        body = ("Text `foo(Date, 2020)` inline\n\n"
+                "```python\nx = arr[1]\n```\n\n"
+                "End (Jones, 2021).")
+        stripped = cc.strip_code(body)
+        self.assertNotIn("foo(", stripped)
+        self.assertNotIn("arr", stripped)
+        self.assertIn("(Jones, 2021)", stripped)
+
+    def test_tilde_fences_are_removed_too(self):
+        stripped = cc.strip_code("~~~\nx = [1]\n~~~\nFine (Jones, 2021).")
+        self.assertNotIn("[1]", stripped)
+        self.assertIn("(Jones, 2021)", stripped)
+
+    def test_a_fence_with_extra_backticks_closes_on_the_same_opener(self):
+        stripped = cc.strip_code("````\n```nested\n````\nFine (Jones, 2021).")
+        self.assertNotIn("nested", stripped)
+        self.assertIn("(Jones, 2021)", stripped)
+
+
+class TestDetectStyle(unittest.TestCase):
+    def test_the_author_date_fixture_is_detected_as_author_date(self):
+        with open(os.path.join(FIXTURES, "sample.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        body, block = cc.split_document(text)
+        self.assertEqual(cc.detect_style(body, block), "author-date")
+
+
 class TestSplitDocument(unittest.TestCase):
     def setUp(self):
         with open(os.path.join(FIXTURES, "sample.md"), encoding="utf-8") as fh:

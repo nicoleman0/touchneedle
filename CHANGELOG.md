@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `--style {auto,author-date,numeric,mla,notes}` on both subcommands, defaulting
+  to auto-detection. The report and the JSON output name the style the run used
+  and whether it was detected or forced. Only author-date is recognised so far;
+  the remaining styles land in 0.2.0.
+- Fenced and inline code is now stripped before the in-text scan, so an array
+  index like `arr[1]` or a signature like `foo(Date, 2020)` in code can no longer
+  be counted as a citation.
+
 ### Changed
 
 - The version number has a single source of truth: `__version__` in

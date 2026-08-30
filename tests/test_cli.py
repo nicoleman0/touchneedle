@@ -68,7 +68,27 @@ class TestCheckCommand(unittest.TestCase):
             data = json.load(fh)
         self.assertEqual(len(data["references"]), 8)
         self.assertEqual(len(data["citations"]), 8)
+        self.assertEqual(data["style"], "author-date")
         self.assertTrue(all("status" in r for r in data["references"]))
+
+    def test_the_report_names_the_citation_style(self):
+        self.assertIn("Style: author-date (detected)", self.report)
+
+
+class TestStyleOverride(unittest.TestCase):
+    def test_a_forced_style_is_reported_as_forced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            proc = run("check", SAMPLE, "--offline", "--style", "author-date",
+                       "--out", out, "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Style: author-date (forced)", report)
+
+    def test_an_unknown_style_is_rejected_before_any_work(self):
+        proc = run("check", SAMPLE, "--style", "footnotes")
+        self.assertNotEqual(proc.returncode, 0)
 
 
 class TestClaimsCommand(unittest.TestCase):
