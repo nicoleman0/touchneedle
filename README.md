@@ -12,9 +12,12 @@ databases. That covers journal articles but misses standards,
 specifications, vendor documentation, and blog posts. In a lot of real
 bibliographies, this is half the list.
 
-So this tool parses a **prose reference list** (Harvard/author-date)
-straight out of Markdown or `.docx`, and routes each entry to whichever
-authority can actually confirm it.
+So this tool parses a **prose reference list** straight out of Markdown or
+`.docx`, in the four style families a real document uses — author-date
+(Harvard, APA, Chicago author-date), numeric (IEEE, Vancouver/AMA), MLA, and
+footnote styles (Chicago notes, MHRA) — and routes each entry to whichever
+authority can actually confirm it. The style is auto-detected, or forced with
+`--style`.
 
 ## What it checks
 
@@ -34,7 +37,10 @@ link is still reported. Detects the fabricated-citation signature — a real tit
 carrying the wrong authors — as `MISMATCH`.
 
 **Internal consistency** — every in-text citation resolves to a list entry, every
-list entry is cited somewhere, and `2025a`/`2025b` suffixes are used unambiguously.
+list entry is cited somewhere, and `2025a`/`2025b` suffixes are used
+unambiguously. Bracket markers resolve by number, author-page citations by
+surname, footnote markers through their note — a shortened note or an `Ibid.`
+links to the full citation it repeats.
 
 **Claim support** — the pass that needs reading rather than fetching. `claims`
 emits a worklist pairing each in-text citation with the sentence making the claim
@@ -77,11 +83,12 @@ touchneedle claims thesis.docx --out claims.md
 From a clone, without installing, that is `python3 scripts/touchneedle.py …` —
 the same file either way.
 
-Options: `--offline` (parse and cross-check only, no network), `--cache DIR`
-(HTTP cache, 7-day TTL, so re-runs are nearly free), `--timeout N`, and
-`--mailto you@example.com` for Crossref and OpenAlex's polite rate-limit pool.
-`--mailto` is off by default and never inferred — it sends an address to third
-parties.
+Options: `--offline` (parse and cross-check only, no network), `--style
+{auto,author-date,numeric,mla,notes}` (default `auto`, detected from the list
+and the in-text markers), `--cache DIR` (HTTP cache, 7-day TTL, so re-runs are
+nearly free), `--timeout N`, and `--mailto you@example.com` for Crossref and
+OpenAlex's polite rate-limit pool. `--mailto` is off by default and never
+inferred — it sends an address to third parties.
 
 `check` exits 2 when something needs attention, 0 when clean, so it drops into CI.
 
@@ -95,13 +102,20 @@ limit of the check, not evidence against the citation.
 
 ## Limits
 
-Author-date reference lists only — numeric styles (Vancouver, IEEE) are not
-parsed. Page numbers, edition and publisher details are not checked.
+Page numbers, edition and publisher details are not checked.
+
+MLA narrative citations that end in a bare page number (`Smith argues the
+point (42)`) are not matched, because a bare parenthesised number cannot be
+told from any other parenthesised digit. A shortened footnote note that cannot
+be linked to its full citation is kept as an entry with a caveat rather than
+silently merged.
+
+The list of in-text citations with no matching entry has expected false
+positives: a regex cannot distinguish `(Smith, 2024)` from `(ICLR 2023)`, or
+`[12]` from a figure reference. The report says which shape to expect per
+style.
 
 Sources behind paywalls cannot be verified beyond their metadata record.
-
-The list of in-text citations with no matching entry has expected false positives,
-because a regex cannot distinguish `(Smith, 2024)` from `(ICLR 2023)`.
 
 ## Development
 

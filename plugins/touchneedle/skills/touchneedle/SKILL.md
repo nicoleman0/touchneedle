@@ -1,13 +1,16 @@
 ---
 name: touchneedle
-version: 0.1.0
-description: Verify that every citation and reference in a document is real, accurately described, and consistently used. Checks reference entries against arXiv, Crossref, OpenAlex, the IETF datatracker and the live web; cross-checks in-text citations against the reference list in both directions; and drives a claim-support pass that reads each source to confirm it actually backs the sentence citing it. Use when asked to check citations, verify references or a bibliography, find hallucinated or fabricated citations, check for dead links in a reference list, or confirm sources say what a draft claims they say.
+version: 0.2.0
+description: Verify that every citation and reference in a document is real, accurately described, and consistently used. Checks reference entries against arXiv, Crossref, OpenAlex, the IETF datatracker and the live web; cross-checks in-text citations against the reference list in both directions; and drives a claim-support pass that reads each source to confirm it actually backs the sentence citing it. Handles author-date (Harvard, APA, Chicago), numeric (IEEE, Vancouver), MLA, and footnote (Chicago notes, MHRA) citation styles in Markdown or .docx. Use when asked to check citations, verify references or a bibliography, find hallucinated or fabricated citations, check for dead links in a reference list, or confirm sources say what a draft claims they say.
 ---
 
 # touchneedle
 
-Verifies a prose reference list (Harvard/author-date and similar) in Markdown or
-`.docx`. Two passes, deliberately separated:
+Verifies a prose reference list in Markdown or `.docx`, in any of the four
+style families a real document uses: author-date (Harvard, APA, Chicago
+author-date), numeric (IEEE, Vancouver/AMA), MLA, and footnote styles (Chicago
+notes, MHRA). The style is auto-detected; `--style` forces it when detection
+guesses wrong. Two passes, deliberately separated:
 
 - **Pass 1 — existence and metadata.** Deterministic, scripted, no judgement.
   Does the source exist, and does the entry describe it correctly?
@@ -28,6 +31,10 @@ python3 scripts/touchneedle.py check <document> --out citation-report.md --json 
 must be on PATH). Options:
 
 - `--offline` — parse and cross-check only, no network. Use to smoke-test parsing.
+- `--style {auto,author-date,numeric,mla,notes}` — the citation style, default
+  `auto` (detected from the reference list and the in-text markers). Force one
+  when detection guesses wrong; parsing itself is per-entry, so a forced style
+  mostly changes the in-text finders and the report wording.
 - `--mailto you@example.com` — sent to Crossref and OpenAlex for their polite
   rate-limit pool. Optional and off by default. **Never pass the user's address
   without asking them first** — it goes to third-party services.
@@ -63,9 +70,13 @@ Do not report a `PARTIAL` or `UNVERIFIABLE` as if it were a problem found. It is
 a gap in what the script could reach, not evidence against the citation. Say
 which it is.
 
-The cross-reference section lists entries never cited and in-text citations with
-no entry. **The second list has expected false positives** — a regex cannot tell
-`(Smith, 2024)` from `(ICLR 2023)`. Filter it before showing it to the user.
+The cross-reference section lists entries never cited and in-text citations
+with no entry. **The second list has expected false positives** — the shape
+differs by style (a parenthesised year like `(ICLR 2023)` in author-date, a
+bracketed figure reference like `[12]` in numeric, a name-page pair in prose
+in MLA), and the report names the shape to expect. Filter it before showing it
+to the user. In a notes document, the list means a marker with no definition
+or a note that could not be linked — both are real problems, not noise.
 
 ## Pass 2 — claim support
 
@@ -73,8 +84,9 @@ no entry. **The second list has expected false positives** — a regex cannot te
 python3 scripts/touchneedle.py claims <document> --out claims-worklist.md
 ```
 
-Produces one entry per in-text citation with the surrounding sentence and a
-locator for the source. Then, for each row:
+Produces one entry per in-text citation — for numeric styles, one per unique
+source-and-sentence pair, so a heavily cited review stays finishable — with
+the surrounding sentence and a locator for the source. Then, for each row:
 
 1. Fetch the source (WebFetch for a URL; the arXiv abs page for an arXiv id).
 2. Read enough to judge the specific claim — not the abstract alone if the claim

@@ -68,7 +68,141 @@ class TestCheckCommand(unittest.TestCase):
             data = json.load(fh)
         self.assertEqual(len(data["references"]), 8)
         self.assertEqual(len(data["citations"]), 8)
+        self.assertEqual(data["style"], "author-date")
         self.assertTrue(all("status" in r for r in data["references"]))
+
+    def test_the_report_names_the_citation_style(self):
+        self.assertIn("Style: author-date (detected)", self.report)
+
+
+class TestStyleOverride(unittest.TestCase):
+    def test_a_forced_style_is_reported_as_forced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            proc = run("check", SAMPLE, "--offline", "--style", "author-date",
+                       "--out", out, "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Style: author-date (forced)", report)
+
+    def test_an_unknown_style_is_rejected_before_any_work(self):
+        proc = run("check", SAMPLE, "--style", "footnotes")
+        self.assertNotEqual(proc.returncode, 0)
+
+
+class TestNumericDocument(unittest.TestCase):
+    """End-to-end over the IEEE-shaped fixture, offline."""
+
+    def test_check_reports_the_expected_totals_and_style(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            proc = run("check", os.path.join(FIXTURES, "sample-numeric.md"),
+                       "--offline", "--out", out,
+                       "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("10 reference entries, 17 in-text citation instances.", report)
+        self.assertIn("Style: numeric (detected)", report)
+
+    def test_the_orphan_marker_is_reported_with_its_bracket_form(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            run("check", os.path.join(FIXTURES, "sample-numeric.md"),
+                "--offline", "--out", out, "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        section = report.split("### In-text citations with no matching")[1]
+        self.assertIn("`[12]`", section)
+
+    def test_claims_dedupes_repeated_markers_in_one_sentence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "claims.md")
+            run("claims", os.path.join(FIXTURES, "sample-numeric.md"),
+                "--out", out)
+            with open(out, encoding="utf-8") as fh:
+                worklist = fh.read()
+        # 17 marker instances, 13 unique source-and-sentence rows.
+        self.assertEqual(worklist.count("- **Verdict**:"), 13)
+
+
+class TestChicagoAuthorDateDocument(unittest.TestCase):
+    """End-to-end over the Chicago fixture, offline like every CLI test."""
+
+    def test_check_reports_the_expected_totals(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            proc = run("check", os.path.join(FIXTURES, "sample-chicago-ad.md"),
+                       "--offline", "--out", out,
+                       "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("7 reference entries, 8 in-text citation instances.", report)
+        self.assertIn("Style: author-date (detected)", report)
+
+
+class TestMlaDocument(unittest.TestCase):
+    """End-to-end over the MLA fixture, offline."""
+
+    def test_check_reports_the_expected_totals_and_style(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            proc = run("check", os.path.join(FIXTURES, "sample-mla.md"),
+                       "--offline", "--out", out,
+                       "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("6 reference entries, 7 in-text citation instances.", report)
+        self.assertIn("Style: mla (detected)", report)
+
+    def test_unresolved_citations_render_as_author_page(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            run("check", os.path.join(FIXTURES, "sample-mla.md"),
+                "--offline", "--out", out, "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        section = report.split("### In-text citations with no matching")[1]
+        self.assertIn("`Nonexistent 7`", section)
+        self.assertIn("`Smith 42`", section)
+
+
+class TestNotesDocument(unittest.TestCase):
+    """End-to-end over the footnotes fixture, offline."""
+
+    def test_check_reports_the_expected_totals_and_style(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            proc = run("check", os.path.join(FIXTURES, "sample-notes.md"),
+                       "--offline", "--out", out,
+                       "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("5 reference entries, 6 in-text citation instances.", report)
+        self.assertIn("Style: notes (detected)", report)
+
+    def test_the_orphan_marker_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            run("check", os.path.join(FIXTURES, "sample-notes.md"),
+                "--offline", "--out", out, "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        section = report.split("### In-text citations with no matching")[1]
+        self.assertIn("`[9]`", section)
+
+    def test_claims_rows_carry_the_sentence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "claims.md")
+            run("claims", os.path.join(FIXTURES, "sample-notes.md"), "--out", out)
+            with open(out, encoding="utf-8") as fh:
+                worklist = fh.read()
+        self.assertEqual(worklist.count("- **Verdict**:"), 6)
+        self.assertIn("Prompt injection was characterised", worklist)
 
 
 class TestClaimsCommand(unittest.TestCase):

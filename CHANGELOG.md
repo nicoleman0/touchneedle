@@ -6,6 +6,105 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A citation marker following an abbreviation (`Smith et al.[3]`, `Fig. 4.[1]`)
+  no longer blanks or truncates the claim sentence in the worklist: the
+  trailing-marker test now carries the same abbreviation guards the sentence
+  splitter does.
+- Two reference entries that no grammar could parse no longer collapse onto one
+  key, which had the report naming the wrong source for a numbered citation.
+- Footnote definitions are scanned for citations in every style, not only in
+  notes documents. Harvesting them out of the text was dropping the citations
+  inside them everywhere else.
+- An access date written bare at the end of an entry (`Accessed 3 Mar. 2021.`),
+  not only the parenthesised Harvard form, is lifted out before any grammar
+  looks for a year.
+- A footnote is linked to a bibliography entry by surname token rather than
+  substring, so `Lee` no longer matches `Leeson`, and an apostrophised surname
+  (`O'Brien`) survives the note parser intact.
+- A year inside a quoted title is no longer taken as the publication year, and
+  a suffixed year (`2020a.`) is no longer lost, which had collapsed the a/b
+  entries onto one key.
+- Bracketed numbers are only citations in a numeric document; elsewhere `[3]`
+  is a figure or a table, and `--style` now suppresses them as documented.
+- Vancouver/AMA entries with the NLM month-qualified date (`2020 Jan;15(2)`)
+  parse as Vancouver instead of falling through and losing their title.
+- An entry no grammar claimed is no longer verified as a paper, which reported
+  a parse gap as NOT_FOUND and failed the run.
+- Two adjacent numeric markers (`[1][2]`) both count; only the second was found.
+- A footnote number is no longer written into a reference's list position,
+  where it could shadow a numbered bibliography entry and mislabel the report.
+
+## [0.2.0] — 2026-08-30
+
+Citation styles beyond Harvard/author-date: numeric (IEEE, Vancouver/AMA),
+MLA, Chicago author-date, and footnote styles (Chicago notes, MHRA), with
+auto-detection and a `--style` override. The verification layer was already
+style-agnostic, so the work is all in parsing and matching; four new fixtures
+pin each family's contract.
+
+### Added
+
+- Footnote and endnote styles (Chicago notes-bibliography, MHRA). pandoc turns
+  `.docx` footnotes into `[^n]` markers and definitions, which are now
+  harvested before the reference list is looked for. A full note becomes an
+  entry unless the bibliography already lists the work; a shortened note
+  (`Greshake, "Not What," 24.`) links to the full citation it repeats — by
+  surname and title prefix, since a similarity score alone would call a short
+  title a poor match — and `Ibid.` repeats the previous note. A shortened note
+  that cannot be linked is kept with an explicit caveat rather than silently
+  merged. A notes-only document with no bibliography heading works: the notes
+  are the reference list.
+- MLA style: `Works Cited` lists, where the year trails the container behind
+  a comma (`Smith, John. "Title." Journal, vol. 5, 2020, pp. 10-20.`) and an
+  undated web source is legitimate. Undated entries are admitted only under a
+  Works Cited or Bibliography heading, and only when they carry a quoted
+  title, so the year gate stays shut for prose everywhere else. In-text
+  author-page parentheticals — `(Smith 42)`, `(Smith and Jones 12)`,
+  `(Greshake et al. 12)`, `(Smith 42; Lee 3)` — match by surname; a surname
+  held by two entries is left unresolved rather than guessed. An access date
+  is no longer mistaken for the publication year. `(Smith 2020)` stays an
+  author-date citation, not MLA with page 2020.
+- Numeric and bracketed citation styles: IEEE, Vancouver/AMA, ACM and numbered
+  lists. Numbered entries (`[1] …`, `1. …`) are parsed with their number, in
+  IEEE shape (initials-first authors, quoted title) and Vancouver shape
+  (initials glued to the surname, unquoted title, `2020;15(2):123-45` year).
+  In-text `[1]`, `[2, 5]`, `[5-7]`, `[1]–[3]`, pandoc superscripts (`^8^`, as
+  converted from a `.docx`) and Unicode superscripts (`¹²`) all resolve to
+  their entry by position; a marker beyond the list is reported unresolved.
+  A numbered list of author-date entries still parses as author-date with the
+  number attached. `--style numeric` forces the label when detection guesses
+  wrong.
+- For numeric styles the claim-support worklist collapses to one row per
+  unique source-and-sentence pair, so a review article's sixty markers over
+  twenty sources stay finishable.
+- Chicago author-date reference lists: a year standing on its own between
+  periods (`Smith, John. 2020. "Title." Journal.`) is now parsed as an entry,
+  alongside the parenthesised-year author-date grammar. Full given names
+  (`Smith, John`) are recognised as person authors, not organisations.
+- APA/Harvard page locators: `(Smith, 2020, p. 5)` and `Smith (2020, pp. 4-6)`
+  are now counted as citations and the locator is carried on the citation
+  record. Trailing words that are not a locator still disqualify the match.
+- `--style {auto,author-date,numeric,mla,notes}` on both subcommands, defaulting
+  to auto-detection. The report and the JSON output name the style the run used
+  and whether it was detected or forced.
+- Fenced and inline code is now stripped before the in-text scan, so an array
+  index like `arr[1]` or a signature like `foo(Date, 2020)` in code can no longer
+  be counted as a citation. Markdown link definitions (`[1]: url`), inline
+  links (`[1](url)`), reference uses (`[text][1]`) and exponents (`x^2^`) are
+  likewise excluded from the numeric markers.
+
+### Fixed
+
+- Quoted titles now match when the punctuation sits inside the closing quote
+  (`"Title." Journal`, the Chicago and IEEE convention) as well as outside it
+  (`'Title', Journal`, the Harvard convention). Previously the Chicago form
+  fell through to the unquoted-title fallback and kept its quotes in the title.
+- Sentence context no longer swallows the sentence after a trailing citation
+  marker (`… appears here.^8^`), and no longer leaks marker fragments into the
+  next citation's context.
+
 ### Changed
 
 - The version number has a single source of truth: `__version__` in
@@ -13,6 +112,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the `SKILL.md` frontmatter and the plugin manifest instead of checking three
   hand-maintained numbers agree, so a release bump is one line plus the sync
   script.
+
+### Known limits
+
+- MLA narrative citations that end in a bare page number (`Smith argues the
+  point (42)`) are not matched — a bare parenthesised number cannot be told
+  from any other parenthesised digit.
+- An entry no grammar claims is kept with its raw text and an explicit
+  "could not parse" note rather than dropped or guessed at.
+- A two-word organisation inside a footnote (`World Bank, "Report,"`) can be
+  read as a natural-order person, which weakens the author check for that
+  entry; the title check still applies.
 
 ## [0.1.0] — 2026-08-30
 
@@ -72,5 +182,6 @@ Both found while writing the test suite for this release:
 - The list of in-text citations with no matching entry has expected false
   positives, because a regex cannot tell `(Smith, 2024)` from `(ICLR 2023)`.
 
-[Unreleased]: https://github.com/nicoleman0/touchneedle/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nicoleman0/touchneedle/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.2.0
 [0.1.0]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.1.0
