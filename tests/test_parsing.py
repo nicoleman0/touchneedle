@@ -105,6 +105,27 @@ class TestSplitEntries(unittest.TestCase):
         )
         self.assertEqual(len(cc.split_entries(block)), 4)
 
+    def test_bare_year_entries_are_admitted(self):
+        block = (
+            "\nSmith, John. 2020. \"A paper about things.\" Journal of Things.\n\n"
+            "Jones, Karen. 2021. \"Another paper about things.\" Journal of Things.\n"
+        )
+        self.assertEqual(len(cc.split_entries(block)), 2)
+
+    def test_single_spaced_bare_year_list_falls_back_to_one_entry_per_line(self):
+        block = (
+            "\nSmith, John. 2020. \"A paper about things.\" Journal of Things.\n"
+            "Jones, Karen. 2021. \"Another paper about things.\" Journal of Things.\n"
+            "Patel, Rupa. 2022. \"A third paper about things.\" Journal of Things.\n"
+        )
+        self.assertEqual(len(cc.split_entries(block)), 3)
+
+    def test_prose_that_mentions_a_year_is_not_an_entry(self):
+        # No period before the year: 'across 2019 and 2020' is a sentence,
+        # not 'Smith, John. 2020.'
+        block = "\nFieldwork was conducted across 2019 and 2020, and coded by hand.\n"
+        self.assertEqual(cc.split_entries(block), [])
+
     def test_discards_table_rows_footnotes_and_images(self):
         block = (
             "\n| Column | Column |\n\n"
@@ -204,6 +225,62 @@ class TestParseEntry(unittest.TestCase):
         ref = cc.parse_entry(
             "Bradner, S. (1997) Key words for use in RFCs, RFC 2119.")
         self.assertNotIn("RFC 2119", ref.title)
+
+
+class TestParseChicagoEntry(unittest.TestCase):
+    """Chicago author-date: the year stands on its own between periods."""
+
+    def test_bare_year_between_periods(self):
+        ref = cc.parse_entry(
+            'Smith, John. 2020. "A paper about things." Journal of Things.')
+        self.assertEqual(ref.style, "chicago-ad")
+        self.assertEqual(ref.name, "Smith")
+        self.assertFalse(ref.is_org)
+        self.assertEqual(ref.year, "2020")
+        self.assertEqual(ref.title, "A paper about things")
+        self.assertEqual(ref.container, "Journal of Things.")
+        self.assertEqual(ref.key, "smith|2020")
+
+    def test_full_given_name_is_a_person_not_an_organisation(self):
+        ref = cc.parse_entry('Smith, John. 2020. "A paper." Journal.')
+        self.assertFalse(ref.is_org)
+        self.assertEqual(ref.name, "Smith")
+
+    def test_organisation_entry_with_bare_year(self):
+        ref = cc.parse_entry(
+            'Anthropic. 2024. "Model Context Protocol Specification." '
+            "Available at: https://modelcontextprotocol.io/specification")
+        self.assertTrue(ref.is_org)
+        self.assertEqual(ref.name, "Anthropic")
+        self.assertEqual(ref.key, "anthropic|2024")
+
+    def test_year_suffix_after_a_bare_year(self):
+        ref = cc.parse_entry('Smith, John. 2020a. "First." Journal.')
+        self.assertEqual((ref.year, ref.suffix, ref.key), ("2020", "a", "smith|2020a"))
+
+    def test_only_the_first_author_is_inverted_the_rest_stay_natural(self):
+        ref = cc.parse_entry(
+            'Debenedetti, Edoardo, Jiace Zhang, and Nicholas Carlini. '
+            '2024. "AgentDojo." arXiv:2406.13352.')
+        self.assertEqual(ref.name, "Debenedetti")
+        self.assertFalse(ref.is_org)
+        self.assertEqual(ref.arxiv, "2406.13352")
+
+    def test_punctuation_inside_the_closing_quote_is_not_part_of_the_title(self):
+        # Chicago and IEEE put the period and comma inside the quotes.
+        ref = cc.parse_entry('Smith, John. 2020. "A paper about things." Journal.')
+        self.assertEqual(ref.title, "A paper about things")
+        self.assertNotIn('"', ref.title)
+
+    def test_unquoted_title_after_a_bare_year(self):
+        ref = cc.parse_entry("Kurzweil, R. 2005. The Singularity Is Near. Viking.")
+        self.assertEqual(ref.title, "The Singularity Is Near")
+        self.assertEqual(ref.container, "Viking.")
+
+    def test_quoted_title_in_an_academic_venue_is_a_paper_with_a_bare_year(self):
+        ref = cc.parse_entry('Smith, John. 2020. "A paper about things." '
+                             "Journal of Things 5, no. 2: 10-20.")
+        self.assertEqual(ref.kind, "paper")
 
 
 if __name__ == "__main__":

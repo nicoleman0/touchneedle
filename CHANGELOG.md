@@ -8,13 +8,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Chicago author-date reference lists: a year standing on its own between
+  periods (`Smith, John. 2020. "Title." Journal.`) is now parsed as an entry,
+  alongside the parenthesised-year author-date grammar. Full given names
+  (`Smith, John`) are recognised as person authors, not organisations.
+- APA/Harvard page locators: `(Smith, 2020, p. 5)` and `Smith (2020, pp. 4-6)`
+  are now counted as citations and the locator is carried on the citation
+  record. Trailing words that are not a locator still disqualify the match.
 - `--style {auto,author-date,numeric,mla,notes}` on both subcommands, defaulting
   to auto-detection. The report and the JSON output name the style the run used
-  and whether it was detected or forced. Only author-date is recognised so far;
-  the remaining styles land in 0.2.0.
+  and whether it was detected or forced. Numeric, MLA and notes land in 0.2.0.
 - Fenced and inline code is now stripped before the in-text scan, so an array
   index like `arr[1]` or a signature like `foo(Date, 2020)` in code can no longer
   be counted as a citation.
+
+### Fixed
+
+- Quoted titles now match when the punctuation sits inside the closing quote
+  (`"Title." Journal`, the Chicago and IEEE convention) as well as outside it
+  (`'Title', Journal`, the Harvard convention). Previously the Chicago form
+  fell through to the unquoted-title fallback and kept its quotes in the title.
 
 ### Changed
 

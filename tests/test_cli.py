@@ -91,6 +91,22 @@ class TestStyleOverride(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
 
 
+class TestChicagoAuthorDateDocument(unittest.TestCase):
+    """End-to-end over the Chicago fixture, offline like every CLI test."""
+
+    def test_check_reports_the_expected_totals(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            proc = run("check", os.path.join(FIXTURES, "sample-chicago-ad.md"),
+                       "--offline", "--out", out,
+                       "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("7 reference entries, 8 in-text citation instances.", report)
+        self.assertIn("Style: author-date (detected)", report)
+
+
 class TestClaimsCommand(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

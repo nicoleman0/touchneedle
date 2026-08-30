@@ -132,18 +132,25 @@ def split_document(text: str) -> tuple[str, str]:
 
 SKIP_ENTRY = re.compile(r"^(\\markboth|\[\^|:::|<!--|!\[|\||\s*$)")
 
+# An entry needs a year, parenthesised (author-date) or standing on its own
+# between periods (Chicago author-date). The leading period in the Chicago
+# branch is what keeps prose out: 'fieldwork ran across 2020' has no period
+# before the year, but 'Smith, John. 2020. "Title."' always does.
+ANY_YEAR = re.compile(r"\((?:19|20)\d\d[a-z]?\)|\.\s*(?:19|20)\d\d[a-z]?(?=$|[.\s])")
+
 
 def split_entries(block: str) -> list[str]:
     """Blank-line-separated entries, with a fallback for one-per-line lists."""
     chunks = [c.strip() for c in re.split(r"\n[ \t]*\n", block)]
     entries = [clean(c) for c in chunks if c and not SKIP_ENTRY.match(c)]
-    entries = [e for e in entries if len(e) > 25 and re.search(r"\((?:19|20)\d\d[a-z]?\)", e)]
+    entries = [e for e in entries if len(e) > 25 and ANY_YEAR.search(e)]
     if len(entries) <= 1 and block.count("\n") > 3:
         # Single-spaced list: start a new entry at each line that opens with a
         # capitalised author or organisation and carries a year.
         entries, current = [], None
         for line in block.splitlines():
-            if re.match(r"^[A-Z\u00c0-\u00dd][^\n]*\((?:19|20)\d\d[a-z]?\)", line.strip()):
+            if (re.match(r"^[A-Z\u00c0-\u00dd]", line.strip())
+                    and ANY_YEAR.search(line)):
                 if current is not None:
                     entries.append(clean(current))
                 current = line
@@ -209,17 +216,29 @@ class Reference:
 
 
 YEAR = re.compile(r"\((19|20)(\d\d)([a-z]?)\)")
+# Chicago author-date puts the year on its own, unparenthesised, between the
+# author segment and the title: 'Smith, John. 2020. "Title." Journal.' The
+# leading period is required -- it is what separates an entry from prose that
+# merely mentions a year -- and the trailing one is consumed so the title does
+# not begin with the year's period.
+CHICAGO_YEAR = re.compile(r"\.\s*((?:19|20)\d\d)([a-z]?)[.\s]?")
 # A quoted title may contain an apostrophe ("what you've signed up for"), so the
-# closing quote is only the one followed by punctuation or end of entry.
+# closing quote is only the one followed by punctuation or the end of the entry
+# -- or preceded by it, because Chicago and IEEE put the comma and period
+# inside the quotes: 'Title.' Journal rather than 'Title', Journal.
 QUOTED = re.compile(
-    r"(?:^|[\s(])[\u2018'\"\u201c](.{8,300}?)[\u2019'\"\u201d](?=\s*[,.;]|\s*$)")
+    r"(?:^|[\s(])[\u2018'\"\u201c](.{8,300}?)[.,;:]?[\u2019'\"\u201d](?=[\s,.;:]|$)")
 URL_RE = re.compile(r"<?(https?://[^\s>)\]]+)>?")
 DOI_RE = re.compile(r"\b(10\.\d{4,9}/[^\s,;>\)\]]+)")
 ARXIV_RE = re.compile(r"arXiv[:\s]\s*(\d{4}\.\d{4,5})(v\d+)?", re.I)
 RFC_RE = re.compile(r"\bRFC\s*(\d{3,5})\b", re.I)
 DRAFT_RE = re.compile(r"\b(draft-[a-z0-9][a-z0-9\-]*[a-z0-9])\b", re.I)
 ACCESSED_RE = re.compile(r"\(Accessed:?\s*([^)]+)\)", re.I)
-PERSON_RE = re.compile(r"^[A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]+,\s*[A-Z]\.")
+# A person's author segment opens 'Surname, Given' -- the given name may be an
+# initial ('Smith, J.') or spelled out ('Smith, John'), because Chicago and
+# MLA spell it out. Organisations have no comma after a single-token surname.
+PERSON_RE = re.compile(
+    r"^[A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]+,\s*[A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]*\.?")
 
 ACADEMIC = re.compile(
     r"\b(proceedings|conference|symposium|workshop|journal|transactions|advances in|"
@@ -231,12 +250,20 @@ def parse_entry(raw: str) -> Reference:
 
     ym = YEAR.search(raw)
     if ym:
+        ref.style = "author-date"
         ref.year = ym.group(1) + ym.group(2)
         ref.suffix = ym.group(3)
         authors = raw[: ym.start()].strip().rstrip(",")
         tail = raw[ym.end():].strip()
     else:
-        authors, tail = "", raw
+        bm = CHICAGO_YEAR.search(raw)
+        if bm:
+            ref.style = "chicago-ad"
+            ref.year, ref.suffix = bm.group(1), bm.group(2)
+            authors = raw[: bm.start()].strip().rstrip(".,")
+            tail = raw[bm.end():].strip()
+        else:
+            authors, tail = "", raw
 
     ref.is_org = not PERSON_RE.match(authors)
     if ref.is_org:
@@ -300,13 +327,17 @@ def parse_entry(raw: str) -> Reference:
 # in-text citations
 # --------------------------------------------------------------------------
 
+# APA and Harvard carry a page locator after the year: '(Smith, 2020, p. 5)',
+# '(Smith 2020, 25)'. Anything else trailing the year disqualifies the match.
+LOCATOR = r"(?:\s*[,;:]\s*((?:pp?\.\s*)?[\d\u2013,\- ]+))?"
+
 PAREN = re.compile(r"\(([^()]{3,120}?(?:19|20)\d\d[a-z]?[^()]{0,40}?)\)")
 NARRATIVE = re.compile(
     r"\b([A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]*"
     r"(?:\s+(?:and|&)\s+[A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]*"
     r"|\s+et\s+al\.?"
     r"|\s+[A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]*){0,3})"
-    r"\s+\(((?:19|20)\d\d)([a-z]?)\)")
+    r"\s+\(((?:19|20)\d\d)([a-z]?)" + LOCATOR + r"\)")
 NOT_A_CITATION = re.compile(
     r"^(accessed|figure|table|chapter|section|appendix|see|eq|equation|n\.?d\.?)\b", re.I)
 
@@ -332,20 +363,23 @@ def find_citations(body: str) -> list[Citation]:
         for part in re.split(r";", inner):
             part = part.strip()
             cm = re.match(
-                r"^(.{2,80}?)[,\s]+((?:19|20)\d\d)([a-z]?)\s*$", part.replace("et al.", "et al"))
+                r"^(.{2,80}?)[,\s]+((?:19|20)\d\d)([a-z]?)" + LOCATOR + r"$",
+                part.replace("et al.", "et al"))
             if not cm:
                 continue
             name = cm.group(1).strip(" ,")
             if NOT_A_CITATION.match(name) or not re.match(r"^[A-Z\u00c0-\u00dd]", name):
                 continue
             out.append(Citation(name, cm.group(2), cm.group(3), "parenthetical",
-                                context(body, m.start())))
+                                context(body, m.start()),
+                                page=(cm.group(4) or "").strip()))
     for m in NARRATIVE.finditer(body):
         name = m.group(1).strip()
         if NOT_A_CITATION.match(name):
             continue
         out.append(Citation(name, m.group(2), m.group(3), "narrative",
-                            context(body, m.start())))
+                            context(body, m.start()),
+                            page=(m.group(4) or "").strip()))
     return out
 
 

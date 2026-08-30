@@ -34,6 +34,29 @@ class TestFindCitations(unittest.TestCase):
             with self.subTest(noise=noise):
                 self.assertEqual(self.names("Text " + noise + " more text."), [])
 
+    def test_chicago_no_comma_parenthetical(self):
+        found = self.names("The vocabulary (Bradner 1997) predates.")
+        self.assertIn(("Bradner", "1997", "parenthetical"), found)
+
+    def test_apa_page_locator_is_carried_on_the_citation(self):
+        cite = cc.find_citations("As shown (Smith, 2020, p. 5) and elsewhere.")[0]
+        self.assertEqual((cite.name, cite.year), ("Smith", "2020"))
+        self.assertEqual(cite.page, "p. 5")
+
+    def test_harvard_page_only_locator(self):
+        cite = cc.find_citations("As shown (Smith, 2020, 25) and elsewhere.")[0]
+        self.assertEqual(cite.page, "25")
+
+    def test_narrative_citation_with_page_locator(self):
+        cite = cc.find_citations("Smith (2020, pp. 4-6) argues the point.")[0]
+        self.assertEqual(cite.form, "narrative")
+        self.assertEqual(cite.page, "pp. 4-6")
+
+    def test_trailing_words_after_the_year_are_not_a_citation(self):
+        # Anything after the year that is not a page locator disqualifies the
+        # match rather than being silently swallowed.
+        self.assertEqual(self.names("See (Smith, 2020 and friends) for more."), [])
+
     def test_accessed_dates_are_not_citations(self):
         self.assertEqual(self.names("The page (Accessed: 1 May 2026) is live."), [])
 
@@ -144,6 +167,51 @@ class TestFixtureEndToEnd(unittest.TestCase):
     def test_orphan_citation_is_identified(self):
         orphans = [c.name for c in self.cites if not c.key]
         self.assertEqual(orphans, ["Nonexistent"])
+
+
+class TestChicagoFixtureEndToEnd(unittest.TestCase):
+    """The Chicago author-date fixture: bare-year entries, author-date text."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.refs, cls.cites, cls.style = cc.collect(
+            os.path.join(FIXTURES, "sample-chicago-ad.md"))
+
+    def test_chicago_author_date_is_the_author_date_family(self):
+        # The entry grammar differs but the in-text form is author-date.
+        self.assertEqual(self.style, "author-date")
+
+    def test_every_entry_is_parsed_with_the_bare_year_grammar(self):
+        self.assertEqual(len(self.refs), 7)
+        self.assertTrue(all(r.style == "chicago-ad" for r in self.refs))
+
+    def test_every_real_citation_is_found(self):
+        self.assertEqual(len(self.cites), 8)
+
+    def test_entry_kinds_route_to_the_right_authority(self):
+        kinds = {r.key: r.kind for r in self.refs}
+        self.assertEqual(kinds["bradner|1997"], "rfc")
+        self.assertEqual(kinds["debenedetti|2024"], "arxiv")
+        self.assertEqual(kinds["greshake|2023"], "doi")
+        self.assertEqual(kinds["anthropic|2024"], "web")
+        self.assertEqual(kinds["smith|2020a"], "paper")
+
+    def test_uncited_entry_is_identified(self):
+        uncited = [r.key for r in self.refs if not r.cited_by]
+        self.assertEqual(uncited, ["uncited|2021"])
+
+    def test_orphan_citation_is_identified(self):
+        orphans = [c.name for c in self.cites if not c.key]
+        self.assertEqual(orphans, ["Nonexistent"])
+
+    def test_bare_citation_of_an_ab_split_is_flagged(self):
+        problems = cc.ambiguous_suffixes(self.refs, self.cites)
+        self.assertTrue(any("without a suffix" in p for p in problems))
+
+    def test_page_locator_survives_the_whole_pipeline(self):
+        located = [c for c in self.cites if c.name.startswith("Debenedetti")]
+        self.assertEqual(len(located), 1)
+        self.assertEqual(located[0].page, "pp. 4-6")
 
 
 if __name__ == "__main__":
