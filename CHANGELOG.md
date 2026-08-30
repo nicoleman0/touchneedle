@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-30
+
+Citation styles beyond Harvard/author-date: numeric (IEEE, Vancouver/AMA),
+MLA, Chicago author-date, and footnote styles (Chicago notes, MHRA), with
+auto-detection and a `--style` override. The verification layer was already
+style-agnostic, so the work is all in parsing and matching; four new fixtures
+pin each family's contract.
+
 ### Added
 
 - Footnote and endnote styles (Chicago notes-bibliography, MHRA). pandoc turns
@@ -75,6 +83,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   hand-maintained numbers agree, so a release bump is one line plus the sync
   script.
 
+### Known limits
+
+- MLA narrative citations that end in a bare page number (`Smith argues the
+  point (42)`) are not matched — a bare parenthesised number cannot be told
+  from any other parenthesised digit.
+- An entry no grammar claims is kept with its raw text and an explicit
+  "could not parse" note rather than dropped or guessed at.
+- A two-word organisation inside a footnote (`World Bank, "Report,"`) can be
+  read as a natural-order person, which weakens the author check for that
+  entry; the title check still applies.
+
 ## [0.1.0] — 2026-08-30
 
 First public release. The checker was written and used to verify the
@@ -133,5 +152,6 @@ Both found while writing the test suite for this release:
 - The list of in-text citations with no matching entry has expected false
   positives, because a regex cannot tell `(Smith, 2024)` from `(ICLR 2023)`.
 
-[Unreleased]: https://github.com/nicoleman0/touchneedle/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nicoleman0/touchneedle/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.2.0
 [0.1.0]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.1.0

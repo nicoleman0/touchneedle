@@ -2,11 +2,12 @@
 """Verify that the citations in a document are real, correctly described, and
 consistently used.
 
-Reads a prose reference list (Harvard/author-date) out of a Markdown or .docx
-document, routes each entry to whichever authority can actually confirm it --
-arXiv, Crossref, OpenAlex, the IETF datatracker, or the live web -- and reports
-what does not line up. Also cross-checks in-text citations against the list in
-both directions.
+Reads a prose reference list out of a Markdown or .docx document -- author-date
+(Harvard, APA, Chicago author-date), numeric (IEEE, Vancouver/AMA), MLA, or
+footnote styles (Chicago notes, MHRA) -- routes each entry to whichever
+authority can actually confirm it -- arXiv, Crossref, OpenAlex, the IETF
+datatracker, or the live web -- and reports what does not line up. Also
+cross-checks in-text citations against the list in both directions.
 
 Standard library only. Python 3.11+.
 
@@ -35,7 +36,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from typing import Any
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 # Goes out in the User-Agent below, so it has to point somewhere a rate-limited
 # API operator can actually reach a human. One token, repo-wide -- see RELEASING.md.
 REPO_URL = "https://github.com/nicoleman0/touchneedle"
@@ -433,6 +434,7 @@ def parse_entry(raw: str) -> Reference:
         # report can quote the entry; the empty name is a coverage gap, not
         # an organisation.
         ref.is_org = True
+        ref.notes.append("no citation grammar fit this entry; verify it by eye")
         set_title(ref, rest)
 
     ref.key = f"{normalise(ref.name)}|{ref.year}{ref.suffix}"
@@ -721,7 +723,7 @@ def build_note_refs(notes: dict[int, str], bib: list[Reference]
                 note_map[n] = last
                 continue
             ref = parse_entry(notes[n])
-            ref.notes.append("Ibid. with no earlier citation to refer to")
+            ref.notes.insert(0, "Ibid. with no earlier citation to refer to")
             note_map[n] = ref.key
             last = ref.key
             out.append(ref)
@@ -734,8 +736,8 @@ def build_note_refs(notes: dict[int, str], bib: list[Reference]
             last = target.key
             continue
         if is_short_note(ref):
-            ref.notes.append("shortened note; could not link it to a fuller "
-                             "citation, so verify it against the source")
+            ref.notes.insert(0, "shortened note; could not link it to a fuller "
+                                "citation, so verify it against the source")
         note_map[n] = ref.key
         last = ref.key
         out.append(ref)
@@ -1189,6 +1191,20 @@ def verify(ref: Reference, f: Fetcher) -> None:
 # reporting
 # --------------------------------------------------------------------------
 
+# What 'an in-text citation with no matching entry' probably is, per style,
+# when it is not a real orphan: the known false-positive shapes.
+UNRESOLVED_CAVEATS = {
+    "author-date": "_Expect false positives here: parenthetical years such as "
+                   "`(ICLR 2023)` look like citations to a regex._",
+    "numeric": "_Expect false positives here: a bracketed number may reference "
+               "a figure, an equation or a table rather than a list entry._",
+    "mla": "_Expect false positives here: parenthetical name-page pairs such as "
+           "`(Smith 42)` in ordinary prose look like citations to a regex._",
+    "notes": "_A marker here has no footnote definition, or its note could not "
+             "be linked to any entry -- both are worth a look._",
+}
+
+
 def cite_label(c: Citation) -> str:
     """How a citation reads in the report, whatever form it was found in."""
     if c.form in ("numeric", "note"):
@@ -1200,11 +1216,14 @@ def cite_label(c: Citation) -> str:
 
 def ref_label(r: Reference) -> str:
     prefix = f"[{r.number}] " if r.number else ""
+    if not r.name:
+        # No grammar claimed the entry; the title or raw text is all it has.
+        return f"{prefix}{r.title[:60] or r.raw[:60]}"
     return f"{prefix}{r.name} ({r.year}{r.suffix})"
 
 
 def build_report(refs: list[Reference], cites: list[Citation], doc: str,
-                 offline: bool, style: str = "") -> str:
+                 offline: bool, style: str = "", forced: bool = False) -> str:
     counts: dict[str, int] = {}
     for r in refs:
         counts[r.status] = counts.get(r.status, 0) + 1
@@ -1218,7 +1237,7 @@ def build_report(refs: list[Reference], cites: list[Citation], doc: str,
          + ("  \u2014 **offline mode, nothing was verified against a live source**"
             if offline else ""), ""]
     if style:
-        L += [f"Style: {style}", ""]
+        L += [f"Style: {style} ({'forced' if forced else 'detected'})", ""]
     L += [f"{len(refs)} reference entries, {len(cites)} in-text citation instances.", "",
           "## Summary", "", "| Status | Count | Meaning |", "|---|---:|---|"]
     meaning = {
@@ -1272,8 +1291,7 @@ def build_report(refs: list[Reference], cites: list[Citation], doc: str,
     L += [f"- {ref_label(r)} \u2014 {r.title[:90]}" for r in uncited] or ["_None._"]
 
     L += ["", "### In-text citations with no matching reference entry", "",
-          "_Expect false positives here: parenthetical years such as `(ICLR 2023)` "
-          "look like citations to a regex._", ""]
+          UNRESOLVED_CAVEATS.get(style, UNRESOLVED_CAVEATS["author-date"]), ""]
     seen = set()
     rows = []
     for c in unresolved:
@@ -1421,7 +1439,6 @@ def main() -> int:
 
     args = ap.parse_args()
     refs, cites, style = collect(args.doc, args.style)
-    style_label = f"{style} (forced)" if args.style != "auto" else f"{style} (detected)"
 
     if args.cmd == "claims":
         out = build_claims(refs, cites, args.doc)
@@ -1433,7 +1450,8 @@ def main() -> int:
                   file=sys.stderr, flush=True)
             verify(r, f)
             print(f"    {r.status}", file=sys.stderr, flush=True)
-        out = build_report(refs, cites, args.doc, args.offline, style_label)
+        out = build_report(refs, cites, args.doc, args.offline, style,
+                           args.style != "auto")
         if args.json_out:
             with open(args.json_out, "w", encoding="utf-8") as fh:
                 json.dump({"style": style,
