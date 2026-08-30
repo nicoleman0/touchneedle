@@ -1,18 +1,24 @@
 # touchneedle
 
-A Claude Code skill that verifies the citations in a document are real,
+Citiation tool that verifies the citations in a document are real,
 accurately described, and consistently used.
 
-Most citation checkers want a `.bib` file and check it against academic
-databases. That covers journal articles and misses everything else — standards,
-specifications, vendor documentation, blog posts — which in a lot of real
-bibliographies is half the list. This one parses a **prose reference list**
-(Harvard/author-date) straight out of Markdown or `.docx`, and routes each entry
-to whichever authority can actually confirm it.
+Useful for both students and examiners who wish to corroborate citations.
+
+It works standalone, or as a coding agent skill.
+
+Most commercial citation checkers want a `.bib` file and check it against academic
+databases. That covers journal articles but misses standards,
+specifications, vendor documentation, and blog posts. In a lot of real
+bibliographies, this is half the list.
+
+So this tool parses a **prose reference list** (Harvard/author-date)
+straight out of Markdown or `.docx`, and routes each entry to whichever
+authority can actually confirm it.
 
 ## What it checks
 
-**Existence and metadata** — scripted, deterministic:
+**Existence and metadata** — scripted and deterministic:
 
 | Entry carries | Checked against |
 |---|---|
@@ -57,7 +63,7 @@ Or as a Claude Code plugin:
 /plugin install touchneedle
 ```
 
-No dependencies beyond Python 3.11+. `pandoc` is needed only for `.docx` input.
+There are no dependencies beyond Python 3.11+. `pandoc` is needed only for `.docx` input.
 
 Then, in Claude Code: *"check the citations in thesis.docx"*.
 
@@ -90,10 +96,12 @@ limit of the check, not evidence against the citation.
 ## Limits
 
 Author-date reference lists only — numeric styles (Vancouver, IEEE) are not
-parsed. Page numbers, edition and publisher details are not checked. Sources
-behind paywalls cannot be verified beyond their metadata record. The list of
-in-text citations with no matching entry has expected false positives, because a
-regex cannot distinguish `(Smith, 2024)` from `(ICLR 2023)`.
+parsed. Page numbers, edition and publisher details are not checked.
+
+Sources behind paywalls cannot be verified beyond their metadata record.
+
+The list of in-text citations with no matching entry has expected false positives,
+because a regex cannot distinguish `(Smith, 2024)` from `(ICLR 2023)`.
 
 ## Development
 
@@ -101,15 +109,9 @@ regex cannot distinguish `(Smith, 2024)` from `(ICLR 2023)`.
 python3 -m unittest discover -s tests -t tests
 ```
 
-91 tests, no install step, and nothing in the suite touches the network — it
-passes on a machine with no route out. `tests/fixtures/sample.md` is the
-parser's contract: it carries a decoy `References management` heading, a
-cross-reference that looks like a citation, an `(Accessed: …)` date, an entry
-nobody cites, and a citation with no entry. Changing what the parser finds means
-changing that fixture on purpose.
+See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. The short
-version: standard library only, tests stay offline, and never let a coverage gap
+The short version: standard library only, tests stay offline, and never let a coverage gap
 report itself as a finding.
 
 ## Licence
