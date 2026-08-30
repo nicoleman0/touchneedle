@@ -91,6 +91,42 @@ class TestStyleOverride(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
 
 
+class TestNumericDocument(unittest.TestCase):
+    """End-to-end over the IEEE-shaped fixture, offline."""
+
+    def test_check_reports_the_expected_totals_and_style(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            proc = run("check", os.path.join(FIXTURES, "sample-numeric.md"),
+                       "--offline", "--out", out,
+                       "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("10 reference entries, 17 in-text citation instances.", report)
+        self.assertIn("Style: numeric (detected)", report)
+
+    def test_the_orphan_marker_is_reported_with_its_bracket_form(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            run("check", os.path.join(FIXTURES, "sample-numeric.md"),
+                "--offline", "--out", out, "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        section = report.split("### In-text citations with no matching")[1]
+        self.assertIn("`[12]`", section)
+
+    def test_claims_dedupes_repeated_markers_in_one_sentence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "claims.md")
+            run("claims", os.path.join(FIXTURES, "sample-numeric.md"),
+                "--out", out)
+            with open(out, encoding="utf-8") as fh:
+                worklist = fh.read()
+        # 17 marker instances, 13 unique source-and-sentence rows.
+        self.assertEqual(worklist.count("- **Verdict**:"), 13)
+
+
 class TestChicagoAuthorDateDocument(unittest.TestCase):
     """End-to-end over the Chicago fixture, offline like every CLI test."""
 

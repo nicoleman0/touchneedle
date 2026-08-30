@@ -8,6 +8,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Numeric and bracketed citation styles: IEEE, Vancouver/AMA, ACM and numbered
+  lists. Numbered entries (`[1] …`, `1. …`) are parsed with their number, in
+  IEEE shape (initials-first authors, quoted title) and Vancouver shape
+  (initials glued to the surname, unquoted title, `2020;15(2):123-45` year).
+  In-text `[1]`, `[2, 5]`, `[5-7]`, `[1]–[3]`, pandoc superscripts (`^8^`, as
+  converted from a `.docx`) and Unicode superscripts (`¹²`) all resolve to
+  their entry by position; a marker beyond the list is reported unresolved.
+  A numbered list of author-date entries still parses as author-date with the
+  number attached. `--style numeric` forces the label when detection guesses
+  wrong.
+- For numeric styles the claim-support worklist collapses to one row per
+  unique source-and-sentence pair, so a review article's sixty markers over
+  twenty sources stay finishable.
 - Chicago author-date reference lists: a year standing on its own between
   periods (`Smith, John. 2020. "Title." Journal.`) is now parsed as an entry,
   alongside the parenthesised-year author-date grammar. Full given names
@@ -17,10 +30,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   record. Trailing words that are not a locator still disqualify the match.
 - `--style {auto,author-date,numeric,mla,notes}` on both subcommands, defaulting
   to auto-detection. The report and the JSON output name the style the run used
-  and whether it was detected or forced. Numeric, MLA and notes land in 0.2.0.
+  and whether it was detected or forced. MLA and notes land in 0.2.0.
 - Fenced and inline code is now stripped before the in-text scan, so an array
   index like `arr[1]` or a signature like `foo(Date, 2020)` in code can no longer
-  be counted as a citation.
+  be counted as a citation. Markdown link definitions (`[1]: url`), inline
+  links (`[1](url)`), reference uses (`[text][1]`) and exponents (`x^2^`) are
+  likewise excluded from the numeric markers.
 
 ### Fixed
 
@@ -28,6 +43,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`"Title." Journal`, the Chicago and IEEE convention) as well as outside it
   (`'Title', Journal`, the Harvard convention). Previously the Chicago form
   fell through to the unquoted-title fallback and kept its quotes in the title.
+- Sentence context no longer swallows the sentence after a trailing citation
+  marker (`… appears here.^8^`), and no longer leaks marker fragments into the
+  next citation's context.
 
 ### Changed
 

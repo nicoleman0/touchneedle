@@ -50,6 +50,25 @@ class TestDetectStyle(unittest.TestCase):
         body, block = cc.split_document(text)
         self.assertEqual(cc.detect_style(body, block), "author-date")
 
+    def test_the_numeric_fixture_is_detected_as_numeric(self):
+        with open(os.path.join(FIXTURES, "sample-numeric.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        body, block = cc.split_document(text)
+        self.assertEqual(cc.detect_style(body, block), "numeric")
+
+    def test_a_numbered_list_cited_author_date_is_not_numeric(self):
+        # The list is numbered markdown, but the body cites by name and year:
+        # author-date with numbers attached, not a numeric style.
+        text = (
+            "As shown (Smith, 2020) and (Jones, 2021).\n\n"
+            "## References\n\n"
+            "1. Smith, J. (2020) 'A first paper', Journal of Things. doi:10.1/a\n\n"
+            "2. Jones, K. (2021) 'A second paper', Journal of Things. doi:10.1/b\n\n"
+            "3. Patel, R. (2022) 'A third paper', Journal of Things. doi:10.1/c\n"
+        )
+        body, block = cc.split_document(text)
+        self.assertEqual(cc.detect_style(body, block), "author-date")
+
 
 class TestSplitDocument(unittest.TestCase):
     def setUp(self):
@@ -281,6 +300,133 @@ class TestParseChicagoEntry(unittest.TestCase):
         ref = cc.parse_entry('Smith, John. 2020. "A paper about things." '
                              "Journal of Things 5, no. 2: 10-20.")
         self.assertEqual(ref.kind, "paper")
+
+
+class TestParseIeeeEntry(unittest.TestCase):
+    """A numbered list in IEEE shape: initials-first authors, quoted title,
+    bare year after the title."""
+
+    def test_number_marker_title_authors_and_year(self):
+        ref = cc.parse_entry(
+            '[1] S. Bradner, "Key Words for Use in RFCs to Indicate Requirement '
+            'Levels," RFC 2119, Mar. 1997.')
+        self.assertEqual(ref.number, 1)
+        self.assertEqual(ref.style, "ieee")
+        self.assertEqual(ref.name, "Bradner")
+        self.assertFalse(ref.is_org)
+        self.assertEqual(ref.year, "1997")
+        self.assertEqual(ref.title, "Key Words for Use in RFCs to Indicate "
+                                    "Requirement Levels")
+        self.assertEqual(ref.rfc, "2119")
+        self.assertEqual(ref.kind, "rfc")
+
+    def test_multi_author_entry_takes_the_first_surname(self):
+        ref = cc.parse_entry(
+            '[2] K. Greshake, S. Abdelnabi, and S. Mishra, "Not What You\'ve '
+            'Signed Up For," in Proceedings of AISec, 2023.')
+        self.assertEqual(ref.name, "Greshake")
+        self.assertEqual(ref.year, "2023")
+
+    def test_et_al_does_not_become_the_surname(self):
+        ref = cc.parse_entry('[3] J. Smith et al., "A paper," Venue, 2020.')
+        self.assertEqual(ref.name, "Smith")
+
+    def test_hyphenated_initials_are_a_person(self):
+        ref = cc.parse_entry('[4] A.-B. Smith, "A paper," Venue, 2020.')
+        self.assertFalse(ref.is_org)
+        self.assertEqual(ref.name, "Smith")
+
+    def test_organisation_author_before_a_quoted_title(self):
+        ref = cc.parse_entry(
+            '[5] Internet Engineering Task Force, "The OAuth 2.1 Authorization '
+            'Framework," Internet-Draft draft-ietf-oauth-v2-1-13, 2025.')
+        self.assertTrue(ref.is_org)
+        self.assertEqual(ref.name, "Internet Engineering Task Force")
+        self.assertEqual(ref.draft, "draft-ietf-oauth-v2-1")
+        self.assertEqual(ref.draft_rev, "13")
+        self.assertEqual(ref.kind, "ietf-draft")
+
+    def test_the_year_is_the_last_one_after_the_title(self):
+        # A year inside the title must not become the publication year.
+        ref = cc.parse_entry('[6] J. Smith, "A 2020 retrospective," Venue, 2021.')
+        self.assertEqual(ref.year, "2021")
+
+    def test_a_quoted_title_after_a_parenthesised_year_stays_author_date(self):
+        # IEEE entries can carry '(2020)' inside a proceedings name; the
+        # parenthesised year there must not be mistaken for the entry's own.
+        ref = cc.parse_entry(
+            '[7] J. Smith, "A paper," in Proceedings of the IEEE Conference '
+            "(2020), pp. 1-5.")
+        self.assertEqual(ref.name, "Smith")
+        self.assertEqual(ref.year, "2020")
+
+    def test_numbered_author_date_entries_keep_their_grammar(self):
+        # A Harvard list written as a markdown numbered list is still
+        # author-date; the number is recorded alongside.
+        ref = cc.parse_entry("1. Smith, J. (2020) 'A paper about things', Journal.")
+        self.assertEqual(ref.number, 1)
+        self.assertEqual(ref.style, "author-date")
+        self.assertEqual(ref.name, "Smith")
+        self.assertEqual(ref.year, "2020")
+
+
+class TestParseVancouverEntry(unittest.TestCase):
+    """Vancouver/AMA: initials glued to the surname, unquoted title, year
+    after the container's period."""
+
+    def test_author_block_and_semicolon_year(self):
+        ref = cc.parse_entry(
+            "1. Smith JA, Jones KB. A title of work. Journal of Things. "
+            "2020;15(2):123-45.")
+        self.assertEqual(ref.number, 1)
+        self.assertEqual(ref.style, "vancouver")
+        self.assertEqual(ref.name, "Smith")
+        self.assertFalse(ref.is_org)
+        self.assertEqual(ref.year, "2020")
+        self.assertEqual(ref.title, "A title of work")
+        self.assertEqual(ref.container, "Journal of Things")
+
+    def test_et_al_in_the_author_block(self):
+        ref = cc.parse_entry("2. Smith JA, Jones KB, et al. Another title. Journal. 2021;1:1-2.")
+        self.assertEqual(ref.name, "Smith")
+        self.assertEqual(ref.year, "2021")
+        self.assertEqual(ref.title, "Another title")
+
+    def test_year_at_the_end_of_the_entry(self):
+        ref = cc.parse_entry("3. Lee C. A third work. Journal of Stuff. 2019.")
+        self.assertEqual((ref.name, ref.year, ref.title), ("Lee", "2019", "A third work"))
+
+    def test_a_quoted_vancouver_title_is_not_an_organisation(self):
+        ref = cc.parse_entry('4. Smith JA. "A quoted title." Journal of Things. 2020;1:1.')
+        self.assertEqual(ref.style, "vancouver")
+        self.assertFalse(ref.is_org)
+        self.assertEqual(ref.name, "Smith")
+        self.assertEqual(ref.title, "A quoted title")
+
+
+class TestNumberedEntryGates(unittest.TestCase):
+    def test_numbered_entries_need_no_year(self):
+        block = (
+            "\n[1] S. Bradner, \"Key Words for Use in RFCs,\" RFC 2119, 1997.\n\n"
+            "[2] K. Greshake, \"Not What You've Signed Up For,\" AISec, 2023.\n\n"
+            "[3] J. Smith, \"A third paper about things,\" Venue, 2020.\n"
+        )
+        entries = cc.split_entries(block)
+        self.assertEqual(len(entries), 3)
+
+    def test_single_spaced_numbered_list_falls_back_one_per_line(self):
+        block = (
+            "\n[1] S. Bradner, \"Key Words for Use in RFCs,\" RFC 2119, 1997.\n"
+            "[2] K. Greshake, \"Not What You've Signed Up For,\" AISec, 2023.\n"
+            "[3] J. Smith, \"A third paper about things,\" Venue, 2020.\n"
+        )
+        self.assertEqual(len(cc.split_entries(block)), 3)
+
+    def test_a_doi_leading_a_chunk_is_not_a_number_marker(self):
+        # '10.1145/...' has no whitespace after the period, so it must not be
+        # read as entry number 10.
+        chunk = "10.1145/3605764.3623985. A stray line that is long enough to pass the length gate."
+        self.assertIsNone(cc.NUM_MARKER.match(chunk))
 
 
 if __name__ == "__main__":
