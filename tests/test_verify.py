@@ -1,0 +1,192 @@
+"""Metadata comparison, status assignment, and the HTTP cache.
+
+Nothing here touches the network: the Fetcher is always constructed offline,
+and records are planted in the cache directly.
+"""
+
+import hashlib
+import json
+import os
+import tempfile
+import time
+import unittest
+
+from context import cc
+
+
+def ref(raw="Smith, J. (2020) 'A study of prompt injection in language models', "
+            "Journal of Things."):
+    return cc.parse_entry(raw)
+
+
+class TestTitleScore(unittest.TestCase):
+    def test_identical_titles_score_one(self):
+        self.assertEqual(cc.title_score("A paper about things",
+                                        "A paper about things"), 1.0)
+
+    def test_a_contained_title_scores_one(self):
+        # A record that carries a subtitle the entry omits is still the same work.
+        self.assertEqual(cc.title_score(
+            "Attention is all you need",
+            "Attention is all you need for machine translation tasks"), 1.0)
+
+    def test_unrelated_titles_score_low(self):
+        self.assertLess(cc.title_score(
+            "A study of prompt injection in language models",
+            "Quantum error correction thresholds in superconducting qubits"), 0.60)
+
+    def test_empty_input_scores_zero(self):
+        self.assertEqual(cc.title_score("", "A paper"), 0.0)
+
+
+class TestAuthorPresent(unittest.TestCase):
+    def test_surname_found_in_a_full_name_list(self):
+        self.assertTrue(cc.author_present("Greshake", ["Kai Greshake", "Sahar Abdelnabi"]))
+
+    def test_surname_absent(self):
+        self.assertFalse(cc.author_present("Greshake", ["Ada Lovelace", "Alan Turing"]))
+
+    def test_accents_do_not_defeat_the_match(self):
+        self.assertTrue(cc.author_present("Öztürk", ["Mehmet Ozturk"]))
+
+    def test_a_substring_of_another_surname_does_not_match(self):
+        self.assertFalse(cc.author_present("Smith", ["Smithson, Jane"]))
+
+
+class TestCheckMetadata(unittest.TestCase):
+    def test_exact_record_verifies(self):
+        r = ref()
+        cc.check_metadata(r, "A study of prompt injection in language models",
+                          ["Jane Smith"], "2020", "Crossref")
+        self.assertEqual(r.status, "VERIFIED")
+
+    def test_loose_title_match_is_partial_not_a_failure(self):
+        r = cc.parse_entry(
+            "Debenedetti, E. (2024) 'AgentDojo: A Dynamic Environment to Evaluate "
+            "Attacks', NeurIPS.")
+        cc.check_metadata(
+            r, "AgentDojo: A Dynamic Environment for Evaluating Prompt Injection "
+               "Attacks and Defenses", ["Edoardo Debenedetti"], "2024", "Crossref")
+        self.assertEqual(r.status, "PARTIAL")
+        self.assertTrue(any("partly matches" in n for n in r.notes))
+
+    def test_a_different_title_is_a_mismatch(self):
+        r = ref()
+        cc.check_metadata(r, "Quantum error correction thresholds in "
+                             "superconducting qubits", ["Jane Smith"], "2020", "Crossref")
+        self.assertEqual(r.status, "MISMATCH")
+
+    def test_right_title_wrong_authors_is_the_fabrication_signature(self):
+        r = ref()
+        cc.check_metadata(r, "A study of prompt injection in language models",
+                          ["Ada Lovelace", "Alan Turing"], "2020", "Crossref")
+        self.assertEqual(r.status, "MISMATCH")
+        self.assertTrue(any("not among" in n for n in r.notes))
+
+    def test_year_off_by_one_is_tolerated(self):
+        # Preprint in one year, proceedings in the next -- routine, not an error.
+        r = ref()
+        cc.check_metadata(r, "A study of prompt injection in language models",
+                          ["Jane Smith"], "2021", "Crossref")
+        self.assertEqual(r.status, "VERIFIED")
+
+    def test_year_off_by_more_than_one_is_a_mismatch(self):
+        r = ref()
+        cc.check_metadata(r, "A study of prompt injection in language models",
+                          ["Jane Smith"], "2015", "Crossref")
+        self.assertEqual(r.status, "MISMATCH")
+        self.assertTrue(any("2020 vs 2015" in n for n in r.notes))
+
+    def test_organisation_entries_skip_the_author_check(self):
+        r = cc.parse_entry("Anthropic (2024) 'Model Context Protocol specification'.")
+        cc.check_metadata(r, "Model Context Protocol specification", ["Some Person"],
+                          "2024", "Crossref")
+        self.assertEqual(r.status, "VERIFIED")
+
+    def test_the_retrieved_record_is_recorded_as_evidence(self):
+        r = ref()
+        cc.check_metadata(r, "A study of prompt injection in language models",
+                          ["Jane Smith"], "2020", "Crossref 10.1/x")
+        self.assertTrue(any("Crossref 10.1/x" in e for e in r.evidence))
+
+
+class TestSeverityOrdering(unittest.TestCase):
+    def test_problem_statuses_sort_above_advisory_ones(self):
+        for bad in cc.PROBLEM_STATUSES:
+            for ok in ("PARTIAL", "LINK_MOVED", "UNVERIFIABLE", "VERIFIED"):
+                with self.subTest(bad=bad, ok=ok):
+                    self.assertLess(cc.SEVERITY[bad], cc.SEVERITY[ok])
+
+    def test_partial_and_unverifiable_are_not_failures(self):
+        self.assertNotIn("PARTIAL", cc.PROBLEM_STATUSES)
+        self.assertNotIn("UNVERIFIABLE", cc.PROBLEM_STATUSES)
+
+
+class TestOfflineVerify(unittest.TestCase):
+    def test_offline_marks_entries_unverifiable_not_failed(self):
+        # Absence of a lookup is not a finding against the citation.
+        with tempfile.TemporaryDirectory() as tmp:
+            f = cc.Fetcher(tmp, offline=True)
+            r = cc.parse_entry("Smith, J. (2020) 'A paper', Journal. doi:10.1/x")
+            cc.verify(r, f)
+        self.assertEqual(r.status, "UNVERIFIABLE")
+        self.assertNotIn(r.status, cc.PROBLEM_STATUSES)
+
+    def test_an_entry_with_nothing_checkable_is_unverifiable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # No quoted title and no academic container, so nothing routes to a
+            # lookup -- this exercises the final branch without any network call.
+            r = cc.parse_entry("Smith, J. (2020) An internal report held on file.")
+            cc.verify(r, cc.Fetcher(tmp, offline=False))
+        self.assertEqual(r.status, "UNVERIFIABLE")
+        self.assertTrue(any("no DOI" in n for n in r.notes))
+
+
+class TestFetcherCache(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = self.tmp.name
+
+    def plant(self, url, accept=None, body="cached body", age=0):
+        key = hashlib.sha256((url + (accept or "")).encode()).hexdigest() + ".json"
+        path = os.path.join(self.dir, key)
+        os.makedirs(self.dir, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"ok": True, "status": 200, "body": body,
+                       "final_url": url, "error": None}, fh)
+        if age:
+            os.utime(path, (time.time() - age, time.time() - age))
+        return path
+
+    def test_offline_returns_a_clean_miss_rather_than_reaching_out(self):
+        rec = cc.Fetcher(self.dir, offline=True).get("https://example.com/never")
+        self.assertFalse(rec["ok"])
+        self.assertEqual(rec["error"], "offline")
+
+    def test_a_cached_record_is_served_even_offline(self):
+        self.plant("https://example.com/x")
+        rec = cc.Fetcher(self.dir, offline=True).get("https://example.com/x")
+        self.assertTrue(rec["ok"])
+        self.assertEqual(rec["body"], "cached body")
+
+    def test_the_cache_key_includes_the_accept_header(self):
+        self.plant("https://example.com/x", accept="application/json", body="json body")
+        f = cc.Fetcher(self.dir, offline=True)
+        self.assertEqual(f.get("https://example.com/x",
+                               accept="application/json")["body"], "json body")
+        self.assertFalse(f.get("https://example.com/x")["ok"])
+
+    def test_a_record_past_the_ttl_is_not_served(self):
+        self.plant("https://example.com/x", age=cc.CACHE_TTL + 60)
+        rec = cc.Fetcher(self.dir, offline=True).get("https://example.com/x")
+        self.assertFalse(rec["ok"])
+        self.assertEqual(rec["error"], "offline")
+
+    def test_the_user_agent_carries_the_version_and_a_contact_url(self):
+        self.assertIn(cc.__version__, cc.UA)
+        self.assertIn("http", cc.UA)
+
+
+if __name__ == "__main__":
+    unittest.main()

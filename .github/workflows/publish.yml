@@ -1,0 +1,44 @@
+name: publish
+
+# Fires when a GitHub release is published, so the tag and the PyPI version
+# always agree. PyPI refuses a version that already exists, and there is no
+# way to re-upload one -- a bad release is yanked and superseded, never
+# replaced. Cutting the release is therefore the point of no return.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # Trusted publishing: PyPI accepts a short-lived OIDC token from this
+    # workflow, so there is no API token to store or leak. Configure it once at
+    # pypi.org/manage/account/publishing -- see RELEASING.md.
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

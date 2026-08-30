@@ -1,0 +1,11 @@
+{
+  "name": "touchneedle",
+  "version": "0.1.0",
+  "description": "Verify that every citation and reference in a document is real, accurately described, and consistently used.",
+  "author": {
+    "name": "ncoleman"
+  },
+  "homepage": "https://github.com/OWNER/touchneedle",
+  "license": "MIT",
+  "keywords": ["citations", "references", "bibliography", "academic", "fact-checking"]
+}

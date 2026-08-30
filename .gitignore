@@ -1,0 +1,24 @@
+# HTTP cache written by the checker (7-day TTL, regenerated on every run)
+.touchneedle-cache/
+*.touchneedle-cache/
+
+# Generated reports
+citation-report.md
+citation-data.json
+claims-worklist.md
+
+# Build artefacts
+build/
+dist/
+*.egg-info/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
