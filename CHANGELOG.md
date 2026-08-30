@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-08-30
+
+Packaging and documentation only; the checker itself is byte-for-byte 0.2.0.
+Cut so the corrected README and the widened keyword set reach the PyPI page,
+which renders whatever the last upload carried.
+
+### Changed
+
+- README leads with what the tool is for and names the fabricated-citation case
+  in the first forty words, that being the snippet search engines and the PyPI
+  page display. Corrects a typo in the opening line.
+- Added a `What it produces` section with a real excerpt, and
+  `docs/example-report.md` with the full report, generated live against the test
+  fixture rather than written by hand.
+- Badges for the PyPI version, the supported Python versions, CI and the licence.
+- Keywords extended across `pyproject.toml`, `.claude-plugin/marketplace.json`
+  and the plugin manifest; classifier list widened; a `Documentation` URL added
+  to the project URLs PyPI renders.
+
 ## [0.2.0] — 2026-08-30
 
 Citation styles beyond Harvard/author-date: numeric (IEEE, Vancouver/AMA),
@@ -179,6 +198,7 @@ Both found while writing the test suite for this release:
 - The list of in-text citations with no matching entry has expected false
   positives, because a regex cannot tell `(Smith, 2024)` from `(ICLR 2023)`.
 
-[Unreleased]: https://github.com/nicoleman0/touchneedle/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/nicoleman0/touchneedle/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.2.1
 [0.2.0]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.2.0
 [0.1.0]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.1.0

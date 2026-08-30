@@ -36,7 +36,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from typing import Any
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 # Goes out in the User-Agent below, so it has to point somewhere a rate-limited
 # API operator can actually reach a human. One token, repo-wide -- see RELEASING.md.
 REPO_URL = "https://github.com/nicoleman0/touchneedle"
