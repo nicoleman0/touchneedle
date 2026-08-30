@@ -7,5 +7,7 @@
   },
   "homepage": "https://github.com/nicoleman0/touchneedle",
   "license": "MIT",
-  "keywords": ["citations", "references", "bibliography", "academic", "fact-checking"]
+  "keywords": ["citations", "references", "bibliography", "academic", "fact-checking",
+    "citation-checker", "hallucination", "llm", "ai-generated", "crossref",
+    "doi", "arxiv", "pandoc", "docx", "markdown", "research-integrity"]
 }
