@@ -38,7 +38,7 @@ from typing import Any
 __version__ = "0.1.0"
 # Goes out in the User-Agent below, so it has to point somewhere a rate-limited
 # API operator can actually reach a human. One token, repo-wide -- see RELEASING.md.
-REPO_URL = "https://github.com/ncoleman/touchneedle"
+REPO_URL = "https://github.com/nicoleman0/touchneedle"
 UA = f"touchneedle/{__version__} (+{REPO_URL}; academic reference verification)"
 CACHE_TTL = 7 * 24 * 3600
 

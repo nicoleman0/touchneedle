@@ -53,13 +53,13 @@ pip install touchneedle
 As a Claude Code skill:
 
 ```bash
-git clone https://github.com/ncoleman/touchneedle ~/.claude/skills/touchneedle
+git clone https://github.com/nicoleman0/touchneedle ~/.claude/skills/touchneedle
 ```
 
 Or as a Claude Code plugin:
 
 ```
-/plugin marketplace add ncoleman/touchneedle
+/plugin marketplace add nicoleman0/touchneedle
 /plugin install touchneedle
 ```
 

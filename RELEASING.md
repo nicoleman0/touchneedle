@@ -2,16 +2,17 @@
 
 ## Where the project lives
 
-GitHub (`ncoleman/touchneedle`) is canonical, because CI, PyPI trusted
-publishing and the plugin marketplace all resolve against it. Codeberg is a
-**pull mirror**, configured once in Codeberg's own UI (Settings -> Repository ->
-Mirror Settings, "Pull from a remote repository"). Nothing in this repository
-configures it, there is no second CI workflow to keep in step, and a push to
-GitHub turns up on Codeberg without a release step.
+GitHub (`nicoleman0/touchneedle`) is canonical, because CI, PyPI trusted
+publishing and the plugin marketplace all resolve against it. The local
+self-hosted Forgejo (`forgejo.lan/ncoleman/touchneedle`) is a **pull mirror**,
+configured once in Forgejo's own UI (Settings -> Repository -> Mirror Settings,
+"Pull from a remote repository"). Nothing in this repository configures it — it
+is not even a git remote here — there is no second CI workflow to keep in step,
+and a push to GitHub turns up on Forgejo without a release step.
 
-Going the other way was considered and rejected: PyPI's trusted publishing only
-mints OIDC tokens for GitHub Actions, so a Codeberg-canonical layout would mean
-storing a long-lived PyPI API token in CI secrets.
+Going Forgejo-canonical was considered and rejected: PyPI's trusted publishing
+only mints OIDC tokens for GitHub Actions, so a Forgejo-canonical layout would
+mean storing a long-lived PyPI API token in CI secrets.
 
 The repository URL appears in `scripts/touchneedle.py` (`REPO_URL`, which goes
 out in the HTTP User-Agent, so it has to point somewhere a rate-limited API
@@ -20,8 +21,8 @@ renders on the sidebar), `README.md`, `CHANGELOG.md` and the plugin manifests.
 If it ever moves, rewrite all of them in one pass:
 
 ```bash
-grep -rl 'ncoleman/touchneedle' . --exclude-dir=.git \
-  | xargs perl -pi -e 's|ncoleman/touchneedle|<new-owner>/touchneedle|g'
+grep -rl 'nicoleman0/touchneedle' . --exclude-dir=.git \
+  | xargs perl -pi -e 's|nicoleman0/touchneedle|<new-owner>/touchneedle|g'
 ```
 
 `perl -pi -e` rather than `sed -i`: the in-place flag takes a mandatory suffix
@@ -56,7 +57,7 @@ reaches 1.0.
 ## Publishing to PyPI
 
 Set up once, at [pypi.org/manage/account/publishing](https://pypi.org/manage/account/publishing/):
-add a **pending publisher** for project `touchneedle`, owner `ncoleman`,
+add a **pending publisher** for project `touchneedle`, owner `nicoleman0`,
 repository `touchneedle`, workflow `publish.yml`, environment `pypi`. Pending is
 the right choice for a project that does not exist on PyPI yet — the first
 successful upload creates it. Do the same on

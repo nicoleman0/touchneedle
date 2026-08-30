@@ -32,10 +32,10 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/ncoleman/touchneedle"
-Source = "https://github.com/ncoleman/touchneedle"
-Changelog = "https://github.com/ncoleman/touchneedle/blob/main/CHANGELOG.md"
-Issues = "https://github.com/ncoleman/touchneedle/issues"
+Homepage = "https://github.com/nicoleman0/touchneedle"
+Source = "https://github.com/nicoleman0/touchneedle"
+Changelog = "https://github.com/nicoleman0/touchneedle/blob/main/CHANGELOG.md"
+Issues = "https://github.com/nicoleman0/touchneedle/issues"
 
 [project.scripts]
 touchneedle = "touchneedle:main"
