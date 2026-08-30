@@ -107,10 +107,14 @@ HEADING = re.compile(r"^(#{1,4})\s*(?:\d+[.)]?\s*)?(?:" + TITLES + r")\b.*$", re
 # A .docx whose Word style never mapped to a heading level leaves the word
 # sitting on a line of its own, sometimes bold or underlined.
 BARE_HEADING = re.compile(r"^[ \t]*[*_]{0,2}(?:" + TITLES + r")[*_:]{0,2}[ \t]*$", re.I | re.M)
+# A Works Cited or Bibliography list may hold undated entries -- an MLA web
+# source has no year to carry -- while a References list is expected to date
+# everything, so the year gate stays shut there.
+YEARLESS_HEADING = re.compile(r"works cited|bibliography", re.I)
 
 
-def split_document(text: str) -> tuple[str, str]:
-    """Split into (body, reference block).
+def split_document(text: str) -> tuple[str, str, str]:
+    """Split into (body, reference block, list heading).
 
     Later candidates win -- the word appears in running prose long before the
     list itself -- but a candidate only wins if entries can actually be parsed
@@ -125,8 +129,10 @@ def split_document(text: str) -> tuple[str, str]:
         rest = text[match.end():]
         nxt = re.search(r"^#{1," + str(level) + r"}\s+\S", rest, re.M)
         block = rest[: nxt.start()] if nxt else rest
-        if len(split_entries(block)) >= 3:
-            return text[: match.start()], block
+        allow_yearless = bool(YEARLESS_HEADING.search(match.group(0)))
+        if len(split_entries(block, allow_yearless)) >= 3:
+            heading = match.group(0).strip("#*_ \t")
+            return text[: match.start()], block, heading
     sys.exit("error: found a References heading but could not parse any entries under it")
 
 
@@ -139,18 +145,25 @@ NUM_MARKER = re.compile(r"^\[?(\d{1,3})[\].)]\s+")
 
 # An entry needs a year -- parenthesised (author-date) or standing on its own
 # between periods (Chicago author-date) -- unless it is numbered, in which
-# case the number alone makes it an entry. The leading period in the Chicago
-# branch is what keeps prose out: 'fieldwork ran across 2020' has no period
-# before the year, but 'Smith, John. 2020. "Title."' always does.
+# case the number alone makes it an entry, or the list is a Works Cited /
+# Bibliography and the entry carries a quoted title, in which case an
+# undated web source is legitimate. The leading period in the Chicago branch
+# is what keeps prose out: 'fieldwork ran across 2020' has no period before
+# the year, but 'Smith, John. 2020. "Title."' always does.
 ANY_YEAR = re.compile(r"\((?:19|20)\d\d[a-z]?\)|\.\s*(?:19|20)\d\d[a-z]?(?=$|[.\s])")
 
 
-def split_entries(block: str) -> list[str]:
+def split_entries(block: str, allow_yearless: bool = False) -> list[str]:
     """Blank-line-separated entries, with a fallback for one-per-line lists."""
+
+    def is_entry(e: str) -> bool:
+        return bool(len(e) > 25
+                    and (NUM_MARKER.match(e) or ANY_YEAR.search(e)
+                         or (allow_yearless and QUOTED.search(e))))
+
     chunks = [c.strip() for c in re.split(r"\n[ \t]*\n", block)]
     entries = [clean(c) for c in chunks if c and not SKIP_ENTRY.match(c)]
-    entries = [e for e in entries
-               if len(e) > 25 and (NUM_MARKER.match(e) or ANY_YEAR.search(e))]
+    entries = [e for e in entries if is_entry(e)]
     if len(entries) <= 1 and block.count("\n") > 3:
         # Single-spaced list: start a new entry at each line that opens with a
         # capitalised author or organisation and carries a year, or with a
@@ -159,7 +172,9 @@ def split_entries(block: str) -> list[str]:
         for line in block.splitlines():
             line = line.strip()
             if NUM_MARKER.match(line) or (re.match(r"^[A-Z\u00c0-\u00dd]", line)
-                                          and ANY_YEAR.search(line)):
+                                          and (ANY_YEAR.search(line)
+                                               or (allow_yearless
+                                                   and QUOTED.search(line)))):
                 if current is not None:
                     entries.append(clean(current))
                 current = line
@@ -184,15 +199,17 @@ def split_entries(block: str) -> list[str]:
 STYLES = ("author-date", "numeric", "mla", "notes")
 
 
-def detect_style(body: str, block: str) -> str:
+def detect_style(body: str, block: str, heading: str = "") -> str:
     """Infer the document's citation style from shape, not first impression.
 
     Follows split_document's philosophy: a candidate only wins if the
     entries under it actually parse. A numbered list whose body carries more
     bracket markers than author-year parentheticals is numeric; a numbered
-    list cited author-date is still author-date.
+    list cited author-date is still author-date. A Works Cited heading with
+    author-page parentheticals in the body is MLA.
     """
-    entries = split_entries(block)
+    allow_yearless = bool(YEARLESS_HEADING.search(heading))
+    entries = split_entries(block, allow_yearless)
     numbered = sum(1 for e in entries if NUM_MARKER.match(e))
     if entries and numbered >= max(3, (len(entries) + 1) // 2):
         text = strip_code(body)
@@ -200,6 +217,8 @@ def detect_style(body: str, block: str) -> str:
                     + len(SUPERSCRIPT_RUN.findall(text)))
         if brackets > len(PAREN.findall(text)):
             return "numeric"
+    if "works cited" in heading.lower() and find_mla_citations(strip_code(body)):
+        return "mla"
     return "author-date"
 
 
@@ -342,8 +361,14 @@ def parse_quoted(ref: Reference, rest: str) -> bool:
         return False
     ref.style = "ieee" if IEEE_PERSON.match(pre) else "mla"
     ref.name, ref.is_org = first_author(pre)
-    years = re.findall(r"\b((?:19|20)\d\d)\b", rest[qm.start():])
-    ref.year = years[-1] if years else ""
+    # The year is the last bare one after the title -- a year inside the title
+    # is not the publication year, but a later one usually is -- except an
+    # access date, which is explicitly not a publication year.
+    after_title = rest[qm.start():]
+    years = [m for m in re.finditer(r"\b((?:19|20)\d\d)\b", after_title)
+             if not re.search(r"accessed",
+                              after_title[max(0, m.start() - 25): m.start()], re.I)]
+    ref.year = years[-1].group(1) if years else ""
     ref.title = qm.group(1).strip()
     ref.container = rest[qm.end():].lstrip(" ,.").strip()
     return True
@@ -563,6 +588,41 @@ def find_numeric_citations(body: str) -> list[Citation]:
     return out
 
 
+# MLA cites by author and page, with no year: '(Smith 42)', '(Smith and
+# Jones 12)', '(Smith 42; Lee 3)'. The name is one surname, or two joined by
+# 'and'; a spelled-out given name ('Karen Smith 55') deliberately does not
+# match, because matching is by surname alone and a false precision would be
+# worse than a documented limit. A page that is itself a year is left to the
+# author-date finder: '(Smith 2020)' is not MLA with page 2020.
+PAREN_ANY = re.compile(r"\(([^()]{2,120}?)\)")
+MLA_INNER = re.compile(
+    r"^([A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]*"
+    r"(?:\s+(?:and|&)\s+[A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]*)?"
+    r"(?:\s+et\s+al\.?)?)"
+    r",?\s+((?:pp?\.\s*)?\d{1,4}(?:\s*[\u2013,\-]\s*\d{1,4})*)$")
+
+
+def find_mla_citations(body: str) -> list[Citation]:
+    """MLA author-page parentheticals: '(Smith 42)', '(Jones and Patel 12)'."""
+    out: list[Citation] = []
+    for m in PAREN_ANY.finditer(body):
+        inner = m.group(1)
+        if re.search(r"accessed", inner, re.I):
+            continue
+        for part in re.split(r";", inner):
+            mm = MLA_INNER.match(part.strip())
+            if not mm:
+                continue
+            name, page = mm.group(1).strip(), mm.group(2).strip()
+            if NOT_A_CITATION.match(name):
+                continue
+            if re.fullmatch(r"(19|20)\d\d", page):
+                continue
+            out.append(Citation(name, "", "", "mla", context(body, m.start()),
+                                page=page))
+    return out
+
+
 # A sentence ends at .!? followed by whitespace or end of line -- or by a
 # citation marker trailing the sentence it documents, which the boundary then
 # consumes whole so it does not leak into the next context: '... here.^8^',
@@ -636,6 +696,17 @@ def match_citations(refs: list[Reference], cites: list[Citation]) -> list[Citati
             if hit:
                 c.key = hit.key
                 hit.cited_by.append(c.form)
+            continue
+        if c.form == "mla":
+            # Author-page: no year to key on, so the surname must be unique
+            # in the list. Two Smiths leave the citation unresolved rather
+            # than guessed.
+            stem = normalise(c.name.split("&")[0])
+            stem = re.split(r"\band\b", stem)[0].strip()
+            candidates = by_surname.get(stem, [])
+            if len(candidates) == 1:
+                c.key = candidates[0].key
+                candidates[0].cited_by.append(c.form)
             continue
         key = citation_key(c.name, c.year, c.suffix)
         if key in by_key:
@@ -990,6 +1061,8 @@ def cite_label(c: Citation) -> str:
     """How a citation reads in the report, whatever form it was found in."""
     if c.form in ("numeric", "note"):
         return f"[{c.number}]"
+    if c.form == "mla":
+        return f"{c.name} {c.page}".strip()
     return f"{c.name} ({c.year}{c.suffix})"
 
 
@@ -1164,13 +1237,19 @@ def collect(doc: str, style: str = "auto") -> tuple[list[Reference], list[Citati
     the gates and the in-text finders, not the per-entry dispatch.
     """
     text = load_text(doc)
-    body, block = split_document(text)
-    effective = style if style in STYLES else detect_style(body, block)
-    refs = [parse_entry(e) for e in split_entries(block)]
+    body, block, heading = split_document(text)
+    effective = style if style in STYLES else detect_style(body, block, heading)
+    allow_yearless = bool(YEARLESS_HEADING.search(heading))
+    refs = [parse_entry(e) for e in split_entries(block, allow_yearless)]
     if not refs:
         sys.exit("error: found a References heading but could not parse any entries under it")
     body = strip_code(body)
-    cites = match_citations(refs, find_citations(body) + find_numeric_citations(body))
+    found = find_citations(body) + find_numeric_citations(body)
+    if effective == "mla":
+        # Author-page parentheticals are only citations in an MLA document;
+        # elsewhere '(Smith 42)' is prose, and finding it would be noise.
+        found += find_mla_citations(body)
+    cites = match_citations(refs, found)
     return refs, cites, effective
 
 

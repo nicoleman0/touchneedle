@@ -202,7 +202,7 @@ class TestAmbiguousSuffixes(unittest.TestCase):
 
     def test_silent_when_suffixes_are_used_consistently(self):
         with open(os.path.join(FIXTURES, "sample.md"), encoding="utf-8") as fh:
-            body, block = cc.split_document(fh.read())
+            body, block, _ = cc.split_document(fh.read())
         refs = [cc.parse_entry(e) for e in cc.split_entries(block)]
         cites = cc.match_citations(refs, cc.find_citations(body))
         self.assertEqual(cc.ambiguous_suffixes(refs, cites), [])
@@ -333,6 +333,131 @@ class TestNumericFixtureEndToEnd(unittest.TestCase):
     def test_a_trailing_superscript_context_is_its_own_sentence(self):
         sup = [c for c in self.cites if c.number == 8][0]
         self.assertEqual(sup.context, "A superscript citation appears here.")
+
+
+class TestFindMlaCitations(unittest.TestCase):
+    def found(self, body):
+        return [(c.name, c.page) for c in cc.find_mla_citations(body)]
+
+    def test_author_page_parenthetical(self):
+        self.assertEqual(self.found("The claim (Smith 42) holds."), [("Smith", "42")])
+
+    def test_comma_between_name_and_page(self):
+        self.assertEqual(self.found("The claim (Smith, 42) holds."), [("Smith", "42")])
+
+    def test_et_al_is_part_of_the_name(self):
+        self.assertEqual(self.found("The claim (Greshake et al. 12) holds."),
+                         [("Greshake et al.", "12")])
+
+    def test_two_authors_joined_by_and(self):
+        self.assertEqual(self.found("The claim (Jones and Patel 12) holds."),
+                         [("Jones and Patel", "12")])
+
+    def test_page_range_and_list(self):
+        self.assertIn(("Smith", "42-45"), self.found("The claim (Smith 42-45) holds."))
+        self.assertIn(("Smith", "42, 50"), self.found("The claim (Smith 42, 50) holds."))
+
+    def test_semicolon_group_yields_one_citation_each(self):
+        self.assertEqual(self.found("As shown (Smith 42; Lee 3)."),
+                         [("Smith", "42"), ("Lee", "3")])
+
+    def test_a_year_where_the_page_would_be_is_author_date_not_mla(self):
+        self.assertEqual(self.found("As shown (Smith 2020) and (Smith, 2020)."), [])
+
+    def test_cross_references_are_not_citations(self):
+        for noise in ("(Table 3)", "(Figure 2)", "(Section 4)", "(Appendix B)"):
+            with self.subTest(noise=noise):
+                self.assertEqual(self.found("Text " + noise + " more."), [])
+
+    def test_a_page_only_parenthetical_is_not_a_citation(self):
+        # MLA narrative form ends '(42)'; matching a bare number would fire
+        # on every parenthesised digit in the document.
+        self.assertEqual(self.found("Smith argues the point (42) here."), [])
+
+    def test_accessed_dates_are_not_citations(self):
+        self.assertEqual(self.found("The page (Accessed 3 June 2026) is live."), [])
+
+
+class TestMatchMlaCitations(unittest.TestCase):
+    def setUp(self):
+        self.refs = [
+            cc.parse_entry('Greshake, Kai. "A paper about things." Journal, 2023.'),
+            cc.parse_entry('Hou, Xiaoxia. "Another paper." Journal, 2025.'),
+        ]
+
+    def match(self, body):
+        return cc.match_citations(self.refs, cc.find_mla_citations(body))
+
+    def test_a_unique_surname_resolves(self):
+        cites = self.match("As shown (Greshake 12).")
+        self.assertEqual(cites[0].key, "greshake|2023")
+        self.assertTrue(self.refs[0].cited_by)
+
+    def test_an_ambiguous_surname_is_left_unresolved_rather_than_guessed(self):
+        refs = [cc.parse_entry('Smith, John. "First." Journal, 2020.'),
+                cc.parse_entry('Smith, Karen. "Second." Journal, 2019.')]
+        cites = cc.match_citations(refs, cc.find_mla_citations("As shown (Smith 42)."))
+        self.assertEqual(cites[0].key, "")
+
+    def test_a_surname_with_no_entry_is_left_unresolved(self):
+        cites = self.match("An orphan (Nonexistent 7).")
+        self.assertEqual(cites[0].key, "")
+
+
+class TestMlaFixtureEndToEnd(unittest.TestCase):
+    """The MLA fixture: Works Cited, author-page parentheticals, an undated
+    web source, and two authors sharing a surname."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.refs, cls.cites, cls.style = cc.collect(
+            os.path.join(FIXTURES, "sample-mla.md"))
+
+    def test_style_is_detected_as_mla(self):
+        self.assertEqual(self.style, "mla")
+
+    def test_every_entry_is_parsed(self):
+        self.assertEqual(len(self.refs), 6)
+        self.assertTrue(all(r.style == "mla" for r in self.refs))
+
+    def test_every_author_page_citation_is_found(self):
+        self.assertEqual(len(self.cites), 7)
+        self.assertTrue(all(c.form == "mla" for c in self.cites))
+
+    def test_the_undated_web_entry_has_no_year(self):
+        anthropic = [r for r in self.refs if r.name == "Anthropic"][0]
+        self.assertEqual(anthropic.year, "")
+        self.assertEqual(anthropic.kind, "web")
+
+    def test_entry_kinds_route_to_the_right_authority(self):
+        kinds = {r.key: r.kind for r in self.refs}
+        self.assertEqual(kinds["greshake|2023"], "doi")
+        self.assertEqual(kinds["hou|2025"], "arxiv")
+        self.assertEqual(kinds["smith|2020"], "paper")
+
+    def test_resolved_citations(self):
+        keys = {c.key for c in self.cites}
+        self.assertIn("greshake|2023", keys)
+        self.assertIn("hou|2025", keys)
+        self.assertIn("anthropic|", keys)
+
+    def test_the_shared_surname_is_left_unresolved(self):
+        smiths = [c for c in self.cites if c.name == "Smith"]
+        self.assertEqual(len(smiths), 2)
+        self.assertTrue(all(c.key == "" for c in smiths))
+
+    def test_uncited_entries_include_both_smiths(self):
+        uncited = sorted(r.key for r in self.refs if not r.cited_by)
+        self.assertEqual(uncited, ["smith|2019", "smith|2020", "uncited|2021"])
+
+    def test_orphan_citation_is_identified(self):
+        orphans = [c.name for c in self.cites if not c.key and c.name != "Smith"]
+        self.assertEqual(orphans, ["Nonexistent"])
+
+    def test_claims_rows_render_author_page(self):
+        worklist = cc.build_claims(self.refs, self.cites, "sample-mla.md")
+        self.assertIn("Greshake et al. 12", worklist)
+        self.assertEqual(worklist.count("- **Verdict**:"), 7)
 
 
 if __name__ == "__main__":

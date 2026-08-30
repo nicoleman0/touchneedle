@@ -143,6 +143,33 @@ class TestChicagoAuthorDateDocument(unittest.TestCase):
         self.assertIn("Style: author-date (detected)", report)
 
 
+class TestMlaDocument(unittest.TestCase):
+    """End-to-end over the MLA fixture, offline."""
+
+    def test_check_reports_the_expected_totals_and_style(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            proc = run("check", os.path.join(FIXTURES, "sample-mla.md"),
+                       "--offline", "--out", out,
+                       "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("6 reference entries, 7 in-text citation instances.", report)
+        self.assertIn("Style: mla (detected)", report)
+
+    def test_unresolved_citations_render_as_author_page(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "r.md")
+            run("check", os.path.join(FIXTURES, "sample-mla.md"),
+                "--offline", "--out", out, "--cache", os.path.join(tmp, "cache"))
+            with open(out, encoding="utf-8") as fh:
+                report = fh.read()
+        section = report.split("### In-text citations with no matching")[1]
+        self.assertIn("`Nonexistent 7`", section)
+        self.assertIn("`Smith 42`", section)
+
+
 class TestClaimsCommand(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

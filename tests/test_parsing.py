@@ -47,14 +47,14 @@ class TestDetectStyle(unittest.TestCase):
     def test_the_author_date_fixture_is_detected_as_author_date(self):
         with open(os.path.join(FIXTURES, "sample.md"), encoding="utf-8") as fh:
             text = fh.read()
-        body, block = cc.split_document(text)
-        self.assertEqual(cc.detect_style(body, block), "author-date")
+        body, block, heading = cc.split_document(text)
+        self.assertEqual(cc.detect_style(body, block, heading), "author-date")
 
     def test_the_numeric_fixture_is_detected_as_numeric(self):
         with open(os.path.join(FIXTURES, "sample-numeric.md"), encoding="utf-8") as fh:
             text = fh.read()
-        body, block = cc.split_document(text)
-        self.assertEqual(cc.detect_style(body, block), "numeric")
+        body, block, heading = cc.split_document(text)
+        self.assertEqual(cc.detect_style(body, block, heading), "numeric")
 
     def test_a_numbered_list_cited_author_date_is_not_numeric(self):
         # The list is numbered markdown, but the body cites by name and year:
@@ -66,8 +66,27 @@ class TestDetectStyle(unittest.TestCase):
             "2. Jones, K. (2021) 'A second paper', Journal of Things. doi:10.1/b\n\n"
             "3. Patel, R. (2022) 'A third paper', Journal of Things. doi:10.1/c\n"
         )
-        body, block = cc.split_document(text)
-        self.assertEqual(cc.detect_style(body, block), "author-date")
+        body, block, heading = cc.split_document(text)
+        self.assertEqual(cc.detect_style(body, block, heading), "author-date")
+
+    def test_the_mla_fixture_is_detected_as_mla(self):
+        with open(os.path.join(FIXTURES, "sample-mla.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        body, block, heading = cc.split_document(text)
+        self.assertEqual(cc.detect_style(body, block, heading), "mla")
+
+    def test_author_page_parentheticals_alone_do_not_make_mla(self):
+        # Without a Works Cited heading, '(Smith 42)' is prose, not an MLA
+        # citation, and the document stays author-date.
+        text = (
+            "As shown (Smith 42) in the earlier study.\n\n"
+            "## References\n\n"
+            "Smith, J. (2020) 'A first paper', Journal of Things. doi:10.1/a\n\n"
+            "Jones, K. (2021) 'A second paper', Journal of Things. doi:10.1/b\n\n"
+            "Patel, R. (2022) 'A third paper', Journal of Things. doi:10.1/c\n"
+        )
+        body, block, heading = cc.split_document(text)
+        self.assertEqual(cc.detect_style(body, block, heading), "author-date")
 
 
 class TestSplitDocument(unittest.TestCase):
@@ -78,13 +97,14 @@ class TestSplitDocument(unittest.TestCase):
     def test_prefers_the_last_heading_that_actually_has_entries(self):
         # The fixture opens with a decoy '## References management' section. A
         # first-match-wins splitter would stop there and find no entries.
-        body, block = cc.split_document(self.text)
+        body, block, heading = cc.split_document(self.text)
         self.assertIn("References management", body)
         self.assertNotIn("References management", block)
         self.assertIn("Debenedetti", block)
+        self.assertEqual(heading, "References")
 
     def test_body_excludes_the_reference_list(self):
-        body, _ = cc.split_document(self.text)
+        body, _, _ = cc.split_document(self.text)
         self.assertIn("Prompt injection was first characterised", body)
         self.assertNotIn("doi:10.1145", body)
 
@@ -98,8 +118,9 @@ class TestSplitDocument(unittest.TestCase):
             "Jones, K. (2021) 'A second paper', Journal of Things. doi:10.1/b\n\n"
             "Patel, R. (2022) 'A third paper', Journal of Things. doi:10.1/c\n"
         )
-        body, block = cc.split_document(text)
+        body, block, heading = cc.split_document(text)
         self.assertIn("Body text", body)
+        self.assertEqual(heading, "References")
         self.assertEqual(len(cc.split_entries(block)), 3)
 
     def test_exits_when_there_is_no_reference_list(self):
@@ -427,6 +448,69 @@ class TestNumberedEntryGates(unittest.TestCase):
         # read as entry number 10.
         chunk = "10.1145/3605764.3623985. A stray line that is long enough to pass the length gate."
         self.assertIsNone(cc.NUM_MARKER.match(chunk))
+
+
+class TestParseMlaEntry(unittest.TestCase):
+    """MLA: 'Surname, Given. "Title." Container, year, pages.' -- the year
+    trails the container, so the entry is claimed by the quoted-title
+    strategy."""
+
+    def test_year_after_the_title(self):
+        ref = cc.parse_entry(
+            'Smith, John. "A Paper About Things." Journal of Things, '
+            "vol. 5, no. 2, 2020, pp. 10-20.")
+        self.assertEqual(ref.style, "mla")
+        self.assertEqual(ref.name, "Smith")
+        self.assertFalse(ref.is_org)
+        self.assertEqual(ref.year, "2020")
+        self.assertEqual(ref.title, "A Paper About Things")
+        self.assertEqual(ref.container,
+                         "Journal of Things, vol. 5, no. 2, 2020, pp. 10-20.")
+        self.assertEqual(ref.kind, "paper")
+
+    def test_et_al_in_the_author_segment(self):
+        ref = cc.parse_entry(
+            'Greshake, Kai, et al. "Not What You\'ve Signed Up For." '
+            "Proceedings of AISec, 2023, pp. 79-90. doi:10.1145/3605764.3623985.")
+        self.assertEqual(ref.style, "mla")
+        self.assertEqual(ref.name, "Greshake")
+        self.assertEqual(ref.year, "2023")
+        self.assertEqual(ref.doi, "10.1145/3605764.3623985")
+
+    def test_an_undated_web_entry_is_allowed(self):
+        ref = cc.parse_entry(
+            'Anthropic. "Model Context Protocol Specification." '
+            "https://modelcontextprotocol.io/specification. Accessed 3 June 2026.")
+        self.assertEqual(ref.style, "mla")
+        self.assertTrue(ref.is_org)
+        self.assertEqual(ref.name, "Anthropic")
+        self.assertEqual(ref.year, "")
+        self.assertEqual(ref.kind, "web")
+
+    def test_an_access_date_is_not_the_publication_year(self):
+        ref = cc.parse_entry(
+            'Anthropic. "Model Context Protocol Specification." '
+            "https://example.com/spec. Accessed 3 June 2026.")
+        self.assertEqual(ref.year, "")
+
+
+class TestYearlessEntryGate(unittest.TestCase):
+    def test_an_undated_quoted_entry_passes_under_works_cited(self):
+        block = ('Anthropic. "A specification of things." https://example.com. '
+                 "Accessed 3 June 2026.")
+        self.assertEqual(len(cc.split_entries("\n" + block + "\n", True)), 1)
+
+    def test_the_same_entry_is_rejected_under_references(self):
+        # A References list is expected to date everything; an undated chunk
+        # there is prose or a broken entry, not a free pass.
+        block = ('Anthropic. "A specification of things." https://example.com. '
+                 "Accessed 3 June 2026.")
+        self.assertEqual(cc.split_entries("\n" + block + "\n"), [])
+
+    def test_undated_prose_is_still_rejected_under_works_cited(self):
+        # No quoted title, so not an entry however lenient the heading.
+        block = "\nThe following list gathers sources consulted during the work.\n"
+        self.assertEqual(cc.split_entries(block, True), [])
 
 
 if __name__ == "__main__":

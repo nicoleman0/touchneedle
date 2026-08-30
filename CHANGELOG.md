@@ -8,6 +8,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- MLA style: `Works Cited` lists, where the year trails the container behind
+  a comma (`Smith, John. "Title." Journal, vol. 5, 2020, pp. 10-20.`) and an
+  undated web source is legitimate. Undated entries are admitted only under a
+  Works Cited or Bibliography heading, and only when they carry a quoted
+  title, so the year gate stays shut for prose everywhere else. In-text
+  author-page parentheticals — `(Smith 42)`, `(Smith and Jones 12)`,
+  `(Greshake et al. 12)`, `(Smith 42; Lee 3)` — match by surname; a surname
+  held by two entries is left unresolved rather than guessed. An access date
+  is no longer mistaken for the publication year. `(Smith 2020)` stays an
+  author-date citation, not MLA with page 2020.
 - Numeric and bracketed citation styles: IEEE, Vancouver/AMA, ACM and numbered
   lists. Numbered entries (`[1] …`, `1. …`) are parsed with their number, in
   IEEE shape (initials-first authors, quoted title) and Vancouver shape
@@ -30,7 +40,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   record. Trailing words that are not a locator still disqualify the match.
 - `--style {auto,author-date,numeric,mla,notes}` on both subcommands, defaulting
   to auto-detection. The report and the JSON output name the style the run used
-  and whether it was detected or forced. MLA and notes land in 0.2.0.
+  and whether it was detected or forced. Notes land in 0.2.0.
 - Fenced and inline code is now stripped before the in-text scan, so an array
   index like `arr[1]` or a signature like `foo(Date, 2020)` in code can no longer
   be counted as a citation. Markdown link definitions (`[1]: url`), inline
