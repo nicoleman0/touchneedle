@@ -1,6 +1,6 @@
 ---
 name: touchneedle
-version: 0.2.0
+version: 0.2.1
 description: Verify that every citation and reference in a document is real, accurately described, and consistently used. Checks reference entries against arXiv, Crossref, OpenAlex, the IETF datatracker and the live web; cross-checks in-text citations against the reference list in both directions; and drives a claim-support pass that reads each source to confirm it actually backs the sentence citing it. Handles author-date (Harvard, APA, Chicago), numeric (IEEE, Vancouver), MLA, and footnote (Chicago notes, MHRA) citation styles in Markdown or .docx. Use when asked to check citations, verify references or a bibliography, find hallucinated or fabricated citations, check for dead links in a reference list, or confirm sources say what a draft claims they say.
 ---
 
