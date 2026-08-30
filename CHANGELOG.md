@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A citation marker following an abbreviation (`Smith et al.[3]`, `Fig. 4.[1]`)
+  no longer blanks or truncates the claim sentence in the worklist: the
+  trailing-marker test now carries the same abbreviation guards the sentence
+  splitter does.
+- Two reference entries that no grammar could parse no longer collapse onto one
+  key, which had the report naming the wrong source for a numbered citation.
+- Footnote definitions are scanned for citations in every style, not only in
+  notes documents. Harvesting them out of the text was dropping the citations
+  inside them everywhere else.
+- An access date written bare at the end of an entry (`Accessed 3 Mar. 2021.`),
+  not only the parenthesised Harvard form, is lifted out before any grammar
+  looks for a year.
+- A footnote is linked to a bibliography entry by surname token rather than
+  substring, so `Lee` no longer matches `Leeson`, and an apostrophised surname
+  (`O'Brien`) survives the note parser intact.
+- A year inside a quoted title is no longer taken as the publication year, and
+  a suffixed year (`2020a.`) is no longer lost, which had collapsed the a/b
+  entries onto one key.
+- Bracketed numbers are only citations in a numeric document; elsewhere `[3]`
+  is a figure or a table, and `--style` now suppresses them as documented.
+- Vancouver/AMA entries with the NLM month-qualified date (`2020 Jan;15(2)`)
+  parse as Vancouver instead of falling through and losing their title.
+- An entry no grammar claimed is no longer verified as a paper, which reported
+  a parse gap as NOT_FOUND and failed the run.
+- Two adjacent numeric markers (`[1][2]`) both count; only the second was found.
+- A footnote number is no longer written into a reference's list position,
+  where it could shadow a numbered bibliography entry and mislabel the report.
+
 ## [0.2.0] — 2026-08-30
 
 Citation styles beyond Harvard/author-date: numeric (IEEE, Vancouver/AMA),

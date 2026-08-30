@@ -1,6 +1,7 @@
 """In-text citation detection and matching against the reference list."""
 
 import os
+import tempfile
 import unittest
 
 from context import FIXTURES, cc
@@ -158,11 +159,36 @@ class TestFindNumericCitations(unittest.TestCase):
     def test_footnote_markers_are_not_numeric_citations(self):
         self.assertEqual(self.numbers("A footnote[^1] here."), [])
 
+    def test_adjacent_markers_are_both_found(self):
+        # '[1][2]' is a normal IEEE pair, not a markdown reference link.
+        self.assertEqual(self.numbers("As shown [1][2] the result holds."), [1, 2])
+
     def test_context_is_captured(self):
         cite = cc.find_numeric_citations(
             "One sentence. The claim appears here [4]. Another sentence.")[0]
         self.assertIn("The claim appears here", cite.context)
         self.assertNotIn("One sentence", cite.context)
+
+
+class TestCitationContext(unittest.TestCase):
+    """The claims worklist lives on these quotes, so a marker after an
+    abbreviation must not blank the sentence it is attached to."""
+
+    def context(self, body):
+        return cc.find_numeric_citations(body)[0].context
+
+    def test_an_abbreviation_before_a_marker_keeps_the_sentence(self):
+        self.assertEqual(
+            self.context("Following Smith et al.[3] we extend the model further."),
+            "Following Smith et al.[3] we extend the model further.")
+
+    def test_an_abbreviated_figure_number_is_not_a_sentence_start(self):
+        self.assertEqual(self.context("Results appear in Fig. 4.[1] Later work disagrees."),
+                         "Results appear in Fig. 4.")
+
+    def test_a_marker_after_a_closed_sentence_quotes_that_sentence(self):
+        self.assertEqual(self.context("First one. The claim is made here.[2] Then more."),
+                         "The claim is made here.")
 
 
 class TestMatchNumericCitations(unittest.TestCase):
@@ -202,8 +228,8 @@ class TestAmbiguousSuffixes(unittest.TestCase):
 
     def test_silent_when_suffixes_are_used_consistently(self):
         with open(os.path.join(FIXTURES, "sample.md"), encoding="utf-8") as fh:
-            body, block, _ = cc.split_document(fh.read())
-        refs = [cc.parse_entry(e) for e in cc.split_entries(block)]
+            body, block, _, entries = cc.split_document(fh.read())
+        refs = [cc.parse_entry(e) for e in entries]
         cites = cc.match_citations(refs, cc.find_citations(body))
         self.assertEqual(cc.ambiguous_suffixes(refs, cites), [])
 
@@ -333,6 +359,37 @@ class TestNumericFixtureEndToEnd(unittest.TestCase):
     def test_a_trailing_superscript_context_is_its_own_sentence(self):
         sup = [c for c in self.cites if c.number == 8][0]
         self.assertEqual(sup.context, "A superscript citation appears here.")
+
+
+class TestStyleGatedFinders(unittest.TestCase):
+    """What counts as a citation depends on the document's style."""
+
+    def collect(self, body):
+        refs = ("Smith, J. (2020) 'A first paper about things', Journal of Things.\n\n"
+                "Jones, K. (2019) 'A second paper about things', Journal of Things.\n\n"
+                "Patel, R. (2022) 'A third paper about things', Journal of Things.\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = os.path.join(tmp, "doc.md")
+            with open(doc, "w", encoding="utf-8") as fh:
+                fh.write(f"# A paper\n\n{body}\n\n## References\n\n{refs}")
+            return cc.collect(doc)
+
+    def test_bracketed_numbers_are_not_citations_in_an_author_date_document(self):
+        refs, cites, style = self.collect(
+            "The table in row [3] and equation [7] and figure [2]. "
+            "Later work by Patel (2022) extends this.")
+        self.assertEqual(style, "author-date")
+        self.assertEqual([c.form for c in cites], ["narrative"])
+
+    def test_footnotes_are_still_scanned_when_the_style_is_not_notes(self):
+        # harvest_notes lifts the definitions out of the text; a citation
+        # inside one is still a citation.
+        refs, cites, style = self.collect(
+            "A term is defined here.[^1] And clarified again.[^2]\n\n"
+            "[^1]: The follow-up is Jones (2019), which says as much.\n\n"
+            "[^2]: A clarification of the term, citing nothing at all.")
+        self.assertEqual(style, "author-date")
+        self.assertIn(("Jones", "2019"), [(c.name, c.year) for c in cites])
 
 
 class TestFindMlaCitations(unittest.TestCase):

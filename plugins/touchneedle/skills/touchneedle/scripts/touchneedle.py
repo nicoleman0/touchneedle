@@ -114,8 +114,8 @@ BARE_HEADING = re.compile(r"^[ \t]*[*_]{0,2}(?:" + TITLES + r")[*_:]{0,2}[ \t]*$
 YEARLESS_HEADING = re.compile(r"works cited|bibliography", re.I)
 
 
-def split_document(text: str) -> tuple[str, str, str]:
-    """Split into (body, reference block, list heading).
+def split_document(text: str) -> tuple[str, str, str, list[str]]:
+    """Split into (body, reference block, list heading, parsed entries).
 
     Later candidates win -- the word appears in running prose long before the
     list itself -- but a candidate only wins if entries can actually be parsed
@@ -130,10 +130,10 @@ def split_document(text: str) -> tuple[str, str, str]:
         rest = text[match.end():]
         nxt = re.search(r"^#{1," + str(level) + r"}\s+\S", rest, re.M)
         block = rest[: nxt.start()] if nxt else rest
-        allow_yearless = bool(YEARLESS_HEADING.search(match.group(0)))
-        if len(split_entries(block, allow_yearless)) >= 3:
+        entries = split_entries(block, bool(YEARLESS_HEADING.search(match.group(0))))
+        if len(entries) >= 3:
             heading = match.group(0).strip("#*_ \t")
-            return text[: match.start()], block, heading
+            return text[: match.start()], block, heading, entries
     sys.exit("error: found a References heading but could not parse any entries under it")
 
 
@@ -200,9 +200,12 @@ def split_entries(block: str, allow_yearless: bool = False) -> list[str]:
 STYLES = ("author-date", "numeric", "mla", "notes")
 
 
-def detect_style(body: str, block: str, heading: str = "",
+def detect_style(body: str, entries: list[str], heading: str = "",
                  notes: dict[int, str] | None = None) -> str:
     """Infer the document's citation style from shape, not first impression.
+
+    `body` must already have been through strip_code(), and `entries` are the
+    parsed reference-list entries split_document returned.
 
     Follows split_document's philosophy: a candidate only wins if the
     entries under it actually parse. A numbered list whose body carries more
@@ -211,23 +214,20 @@ def detect_style(body: str, block: str, heading: str = "",
     notes read like citations make a notes document; a Works Cited heading
     with author-page parentheticals in the body is MLA.
     """
-    allow_yearless = bool(YEARLESS_HEADING.search(heading))
-    entries = split_entries(block, allow_yearless)
     numbered = sum(1 for e in entries if NUM_MARKER.match(e))
     if entries and numbered >= max(3, (len(entries) + 1) // 2):
-        text = strip_code(body)
-        brackets = (len(BRACKET_CITE.findall(text)) + len(PANDOC_SUP.findall(text))
-                    + len(SUPERSCRIPT_RUN.findall(text)))
-        if brackets > len(PAREN.findall(text)):
+        brackets = (len(BRACKET_CITE.findall(body)) + len(PANDOC_SUP.findall(body))
+                    + len(SUPERSCRIPT_RUN.findall(body)))
+        if brackets > len(PAREN.findall(body)):
             return "numeric"
     if notes:
         # Aside footnotes ('[^1]: a clarification, really') are not citations;
         # require most definitions to read like one before claiming notes.
         citationish = sum(1 for d in notes.values()
                           if QUOTED.search(d) or ANY_YEAR.search(d))
-        if citationish >= max(2, len(notes) // 2) and NOTE_REF.search(strip_code(body)):
+        if citationish >= max(2, len(notes) // 2) and NOTE_REF.search(body):
             return "notes"
-    if "works cited" in heading.lower() and find_mla_citations(strip_code(body)):
+    if "works cited" in heading.lower() and find_mla_citations(body):
         return "mla"
     return "author-date"
 
@@ -280,7 +280,13 @@ DOI_RE = re.compile(r"\b(10\.\d{4,9}/[^\s,;>\)\]]+)")
 ARXIV_RE = re.compile(r"arXiv[:\s]\s*(\d{4}\.\d{4,5})(v\d+)?", re.I)
 RFC_RE = re.compile(r"\bRFC\s*(\d{3,5})\b", re.I)
 DRAFT_RE = re.compile(r"\b(draft-[a-z0-9][a-z0-9\-]*[a-z0-9])\b", re.I)
-ACCESSED_RE = re.compile(r"\(Accessed:?\s*([^)]+)\)", re.I)
+# 'Accessed: 3 June 2026' comes parenthesised in Harvard and bare at the end
+# of an MLA entry. Either way it is not a publication date, so parse_entry
+# lifts it out before any grammar goes looking for a year.
+# The date has to start like a date -- a day number or a month name -- so that
+# 'accessed from the 2019 census' in running entry text is left alone.
+ACCESSED_RE = re.compile(
+    r"[(\[]?\s*Accessed:?\s+((?:\d|[A-Z][a-z]{2})[^)\]]{0,18}?(?:19|20)\d\d)[.)\]]*")
 # A person's author segment opens 'Surname, Given' -- the given name may be an
 # initial ('Smith, J.') or spelled out ('Smith, John'), because Chicago and
 # MLA spell it out. Organisations have no comma after a single-token surname.
@@ -298,7 +304,10 @@ VANCOUVER_BLOCK = re.compile(
     r"(?:\s+[A-Z]{1,3})+))?"
     r"\.\s+")
 # Vancouver's year follows the container's period: '. 2020;15(2):123-45.'
-VANCOUVER_YEAR = re.compile(r"\.\s*((?:19|20)\d\d)\s*(?=[;:.]|$)")
+# NLM qualifies a monthly journal's date -- '. 2020 Jan;15(2)' -- so an
+# optional month and day sit between the year and the delimiter.
+VANCOUVER_YEAR = re.compile(
+    r"\.\s*((?:19|20)\d\d)(?:\s+[A-Za-z]{3,9}\.?(?:\s+\d{1,2})?)?\s*(?=[;:.]|$)")
 
 ACADEMIC = re.compile(
     r"\b(proceedings|conference|symposium|workshop|journal|transactions|advances in|"
@@ -371,14 +380,11 @@ def parse_quoted(ref: Reference, rest: str) -> bool:
         return False
     ref.style = "ieee" if IEEE_PERSON.match(pre) else "mla"
     ref.name, ref.is_org = first_author(pre)
-    # The year is the last bare one after the title -- a year inside the title
-    # is not the publication year, but a later one usually is -- except an
-    # access date, which is explicitly not a publication year.
-    after_title = rest[qm.start():]
-    years = [m for m in re.finditer(r"\b((?:19|20)\d\d)\b", after_title)
-             if not re.search(r"accessed",
-                              after_title[max(0, m.start() - 25): m.start()], re.I)]
-    ref.year = years[-1].group(1) if years else ""
+    # The year is the last bare one after the title: a year inside the title
+    # is not the publication year, so the search starts where the title ends.
+    # An access date is already out of the entry by now.
+    years = re.findall(r"\b((?:19|20)\d\d)([a-z]?)\b", rest[qm.end():])
+    ref.year, ref.suffix = years[-1] if years else ("", "")
     ref.title = qm.group(1).strip()
     ref.container = rest[qm.end():].lstrip(" ,.").strip()
     return True
@@ -422,6 +428,9 @@ def parse_entry(raw: str) -> Reference:
     if nm := NUM_MARKER.match(rest):
         ref.number = int(nm.group(1))
         rest = rest[nm.end():].strip()
+    if m := ACCESSED_RE.search(rest):
+        ref.accessed = m.group(1).strip(" .,")
+        rest = (rest[: m.start()] + " " + rest[m.end():]).strip()
 
     # First strategy whose shape fits the entry wins. A numbered list of
     # author-date entries still parses as author-date -- the marker is
@@ -438,6 +447,11 @@ def parse_entry(raw: str) -> Reference:
         set_title(ref, rest)
 
     ref.key = f"{normalise(ref.name)}|{ref.year}{ref.suffix}"
+    if ref.key == "|":
+        # No name and no year to key on. The list position, or failing that the
+        # entry's own text, keeps two unparsed entries from collapsing into one
+        # key -- and one of them from standing in for the other in the report.
+        ref.key = f"#{ref.number}|" if ref.number else f"{normalise(raw)[:60]}|"
 
     if m := URL_RE.search(rest):
         ref.url = m.group(1).rstrip(".,;")
@@ -453,9 +467,6 @@ def parse_entry(raw: str) -> Reference:
         full = m.group(1)
         rm = re.match(r"^(.*?)-(\d{2})$", full)
         ref.draft, ref.draft_rev = (rm.group(1), rm.group(2)) if rm else (full, "")
-    if m := ACCESSED_RE.search(rest):
-        ref.accessed = m.group(1).strip()
-        ref.title = re.sub(r"\s*\(Accessed:?[^)]*\)", "", ref.title).strip()
     ref.title = re.sub(r"\s*Available at:?.*$", "", ref.title, flags=re.I)
     # An unquoted title often absorbs the series identifier that follows it;
     # trim it so title matching compares like with like.
@@ -471,7 +482,7 @@ def parse_entry(raw: str) -> Reference:
         ref.kind = "rfc"
     elif ref.draft:
         ref.kind = "ietf-draft"
-    elif ref.title and ACADEMIC.search(ref.container):
+    elif ref.title and ref.style and ACADEMIC.search(ref.container):
         ref.kind = "paper"
     elif ref.url:
         ref.kind = "web"
@@ -543,9 +554,12 @@ def find_citations(body: str) -> list[Citation]:
 # superscript forms pandoc emits for a .docx -- '^8^' and the Unicode digits.
 # The lookarounds keep markdown that merely contains bracketed digits out:
 # link definitions ('[1]: url'), inline links ('[1](url)'), reference uses
-# ('[text][1]') and exponents ('x^2^').
+# ('[text][1]') and exponents ('x^2^'). The lookbehind rejects only a bracket
+# closing on a non-digit, so the second of two adjacent markers ('[1][2]', a
+# normal IEEE pair) still counts; a reference link whose text ends in a digit
+# is the documented price of that.
 BRACKET_CITE = re.compile(
-    r"(?<!\])\[(\d{1,3}(?:\s*[,;\u2013\-]\s*\d{1,3})*)\](?![:(])")
+    r"(?<![^\d]\])\[(\d{1,3}(?:\s*[,;\u2013\-]\s*\d{1,3})*)\](?![:(])")
 DASHED_BRACKETS = re.compile(r"\[(\d{1,3})\]\s*[\u2013\-]\s*\[(\d{1,3})\]")
 PANDOC_SUP = re.compile(r"(?<![A-Za-z0-9=])\^(\d{1,3})\^(?![A-Za-z0-9])")
 SUPERSCRIPT_RUN = re.compile(
@@ -670,7 +684,9 @@ def note_surname(text: str) -> str:
     """First surname in a note, inverted ('Greshake, Kai,') or natural
     ('Kai Greshake,'). A one-token head is an inverted surname; a multi-token
     head with no comma inside it is a given name plus surname."""
-    before_title = re.split(r"[\u2018'\"\u201c]", text, maxsplit=1)[0]
+    # An opening quote follows a space or a bracket; an apostrophe inside a
+    # surname ("O'Brien") does not, and must not cut the name in half.
+    before_title = re.split(r"(?:^|[\s(\[])[\u2018'\"\u201c]", text, maxsplit=1)[0]
     head = before_title.split(",")[0].strip()
     tokens = head.split()
     if len(tokens) == 1:
@@ -692,11 +708,12 @@ def find_note_target(ref: Reference, pool: list[Reference]) -> Reference | None:
     shortened note quotes the first words of the title, and a similarity
     score alone would call 'Not What' and 'Not What You've Signed Up For' a
     poor match."""
-    surname = normalise(note_surname(ref.raw))
+    surname = normalise(note_surname(ref.raw)).split(" ")[-1]
     if not surname or not ref.title:
         return None
     for cand in pool:
-        if not cand.title or surname not in normalise(cand.name):
+        # Token match, as author_present does it: 'Lee' is not 'Leeson'.
+        if not cand.title or surname not in normalise(cand.name).split():
             continue
         full, short = normalise(cand.title), normalise(ref.title)
         if (title_score(ref.title, cand.title) >= 0.60
@@ -728,8 +745,9 @@ def build_note_refs(notes: dict[int, str], bib: list[Reference]
             last = ref.key
             out.append(ref)
             continue
+        # No ref.number: that field is a position in a numbered reference
+        # list, and a footnote number is a different numbering space.
         ref = parse_entry(notes[n])
-        ref.number = n
         target = find_note_target(ref, bib + out)
         if target:
             note_map[n] = target.key
@@ -751,11 +769,16 @@ def build_note_refs(notes: dict[int, str], bib: list[Reference]
 # so a decimal ('3.14') never looks like a sentence break.
 SENT_END = re.compile(
     r"(?<![A-Z])(?<!\bet al)(?<!\bvol)(?<!\bpp)[.!?]"
+    r"(?![ \t]*\d)"          # 'Fig. 4', 'No. 14': an abbreviation, not a stop
     r"(?:\s|$"
     r"|\^\d{1,3}\^"
     r"|\[\^?\d{1,3}\]"
     r"|[\u00b9\u00b2\u00b3\u2070\u2074-\u2079]{1,3}"
     r")")
+# A marker abutting the punctuation ('shown.[1]') documents the sentence just
+# closed, so the forward half of the quote is dropped. The abbreviation guards
+# are SENT_END's: 'Smith et al.[3] we extend' is one sentence, not two.
+TRAILING_STOP = re.compile(r"(?<!\bet al)(?<!\bvol)(?<!\bpp)[.!?\u2026]$")
 
 
 def context(body: str, pos: int, width: int = 420) -> str:
@@ -775,7 +798,7 @@ def context(body: str, pos: int, width: int = 420) -> str:
         bounds = bounds[:-1]
     if bounds:
         left = left[bounds[-1].end():]
-    if pos > 0 and body[pos - 1] in ".!?\u2026":
+    if TRAILING_STOP.search(left):
         right = ""            # a trailing marker documents the closed sentence
     else:
         fwd = SENT_END.search(right)
@@ -835,9 +858,7 @@ def match_citations(refs: list[Reference], cites: list[Citation],
             # Author-page: no year to key on, so the surname must be unique
             # in the list. Two Smiths leave the citation unresolved rather
             # than guessed.
-            stem = normalise(c.name.split("&")[0])
-            stem = re.split(r"\band\b", stem)[0].strip()
-            candidates = by_surname.get(stem, [])
+            candidates = by_surname.get(citation_key(c.name, "", "").split("|")[0], [])
             if len(candidates) == 1:
                 c.key = candidates[0].key
                 candidates[0].cited_by.append(c.form)
@@ -1316,12 +1337,12 @@ def build_report(refs: list[Reference], cites: list[Citation], doc: str,
 def ambiguous_suffixes(refs: list[Reference], cites: list[Citation]) -> list[str]:
     """Same author+year split across a/b in the list must be cited with a suffix.
 
-    Only author-date family entries carry suffixes, so numeric and MLA
-    entries are not considered.
+    Only entries cited by name carry suffixes; in a numbered list the marker
+    disambiguates, so IEEE and Vancouver entries are not considered.
     """
     groups: dict[str, list[Reference]] = {}
     for r in refs:
-        if r.style not in ("author-date", "chicago-ad"):
+        if r.style not in ("author-date", "chicago-ad", "mla"):
             continue
         groups.setdefault(f"{normalise(r.name)}|{r.year}", []).append(r)
     out = []
@@ -1390,20 +1411,29 @@ def collect(doc: str, style: str = "auto") -> tuple[list[Reference], list[Citati
     if notes and not (HEADING.search(text) or BARE_HEADING.search(text)):
         # A notes-only document: the footnotes are the reference list, and
         # there is no heading to find.
-        body, block, heading = text, "", "Notes"
+        entries: list[str] = []
+        body, heading = text, "Notes"
     else:
-        body, block, heading = split_document(text)
-    effective = style if style in STYLES else detect_style(body, block, heading, notes)
-    allow_yearless = bool(YEARLESS_HEADING.search(heading))
-    refs = [parse_entry(e) for e in split_entries(block, allow_yearless)] if block else []
+        body, _, heading, entries = split_document(text)
+    body = strip_code(body)
+    effective = style if style in STYLES else detect_style(body, entries, heading, notes)
+    refs = [parse_entry(e) for e in entries]
     if not refs and not notes:
         sys.exit("error: found a References heading but could not parse any entries under it")
     note_map: dict[int, str] = {}
     if effective == "notes" and notes:
         note_refs, note_map = build_note_refs(notes, refs)
         refs = refs + note_refs
-    body = strip_code(body)
-    found = find_citations(body) + find_numeric_citations(body)
+    elif notes:
+        # Not a notes document, but harvest_notes took the definitions out of
+        # the text and the citations inside them are still citations: put them
+        # back where the finders can see them.
+        body += "\n\n" + "\n\n".join(notes[n] for n in sorted(notes))
+    found = find_citations(body)
+    if effective == "numeric":
+        # A bracketed number is only a citation in a numeric document;
+        # elsewhere '[3]' is a row, an equation or a figure.
+        found += find_numeric_citations(body)
     if effective == "mla":
         # Author-page parentheticals are only citations in an MLA document;
         # elsewhere '(Smith 42)' is prose, and finding it would be noise.
@@ -1446,7 +1476,7 @@ def main() -> int:
         f = Fetcher(args.cache, timeout=args.timeout, offline=args.offline,
                     mailto=args.mailto)
         for i, r in enumerate(refs, 1):
-            print(f"[{i}/{len(refs)}] {r.name} ({r.year}{r.suffix}) …",
+            print(f"[{i}/{len(refs)}] {ref_label(r)} …",
                   file=sys.stderr, flush=True)
             verify(r, f)
             print(f"    {r.status}", file=sys.stderr, flush=True)

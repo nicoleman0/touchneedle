@@ -47,14 +47,14 @@ class TestDetectStyle(unittest.TestCase):
     def test_the_author_date_fixture_is_detected_as_author_date(self):
         with open(os.path.join(FIXTURES, "sample.md"), encoding="utf-8") as fh:
             text = fh.read()
-        body, block, heading = cc.split_document(text)
-        self.assertEqual(cc.detect_style(body, block, heading), "author-date")
+        body, block, heading, entries = cc.split_document(text)
+        self.assertEqual(cc.detect_style(cc.strip_code(body), entries, heading), "author-date")
 
     def test_the_numeric_fixture_is_detected_as_numeric(self):
         with open(os.path.join(FIXTURES, "sample-numeric.md"), encoding="utf-8") as fh:
             text = fh.read()
-        body, block, heading = cc.split_document(text)
-        self.assertEqual(cc.detect_style(body, block, heading), "numeric")
+        body, block, heading, entries = cc.split_document(text)
+        self.assertEqual(cc.detect_style(cc.strip_code(body), entries, heading), "numeric")
 
     def test_a_numbered_list_cited_author_date_is_not_numeric(self):
         # The list is numbered markdown, but the body cites by name and year:
@@ -66,20 +66,20 @@ class TestDetectStyle(unittest.TestCase):
             "2. Jones, K. (2021) 'A second paper', Journal of Things. doi:10.1/b\n\n"
             "3. Patel, R. (2022) 'A third paper', Journal of Things. doi:10.1/c\n"
         )
-        body, block, heading = cc.split_document(text)
-        self.assertEqual(cc.detect_style(body, block, heading), "author-date")
+        body, block, heading, entries = cc.split_document(text)
+        self.assertEqual(cc.detect_style(cc.strip_code(body), entries, heading), "author-date")
 
     def test_the_mla_fixture_is_detected_as_mla(self):
         with open(os.path.join(FIXTURES, "sample-mla.md"), encoding="utf-8") as fh:
             text = fh.read()
-        body, block, heading = cc.split_document(text)
-        self.assertEqual(cc.detect_style(body, block, heading), "mla")
+        body, block, heading, entries = cc.split_document(text)
+        self.assertEqual(cc.detect_style(cc.strip_code(body), entries, heading), "mla")
 
     def test_the_notes_fixture_is_detected_as_notes(self):
         with open(os.path.join(FIXTURES, "sample-notes.md"), encoding="utf-8") as fh:
             rest, notes = cc.harvest_notes(fh.read())
-        body, block, heading = cc.split_document(rest)
-        self.assertEqual(cc.detect_style(body, block, heading, notes), "notes")
+        body, block, heading, entries = cc.split_document(rest)
+        self.assertEqual(cc.detect_style(cc.strip_code(body), entries, heading, notes), "notes")
 
     def test_aside_footnotes_do_not_make_a_notes_document(self):
         # Definitions that read like clarifications, not citations, keep the
@@ -93,8 +93,9 @@ class TestDetectStyle(unittest.TestCase):
             "[^1]: A clarification of the term, not a citation of anything.\n"
         )
         rest, notes = cc.harvest_notes(text)
-        body, block, heading = cc.split_document(rest)
-        self.assertEqual(cc.detect_style(body, block, heading, notes), "author-date")
+        body, block, heading, entries = cc.split_document(rest)
+        self.assertEqual(cc.detect_style(cc.strip_code(body), entries, heading, notes),
+                         "author-date")
 
     def test_author_page_parentheticals_alone_do_not_make_mla(self):
         # Without a Works Cited heading, '(Smith 42)' is prose, not an MLA
@@ -106,8 +107,8 @@ class TestDetectStyle(unittest.TestCase):
             "Jones, K. (2021) 'A second paper', Journal of Things. doi:10.1/b\n\n"
             "Patel, R. (2022) 'A third paper', Journal of Things. doi:10.1/c\n"
         )
-        body, block, heading = cc.split_document(text)
-        self.assertEqual(cc.detect_style(body, block, heading), "author-date")
+        body, block, heading, entries = cc.split_document(text)
+        self.assertEqual(cc.detect_style(cc.strip_code(body), entries, heading), "author-date")
 
 
 class TestSplitDocument(unittest.TestCase):
@@ -118,14 +119,14 @@ class TestSplitDocument(unittest.TestCase):
     def test_prefers_the_last_heading_that_actually_has_entries(self):
         # The fixture opens with a decoy '## References management' section. A
         # first-match-wins splitter would stop there and find no entries.
-        body, block, heading = cc.split_document(self.text)
+        body, block, heading, entries = cc.split_document(self.text)
         self.assertIn("References management", body)
         self.assertNotIn("References management", block)
         self.assertIn("Debenedetti", block)
         self.assertEqual(heading, "References")
 
     def test_body_excludes_the_reference_list(self):
-        body, _, _ = cc.split_document(self.text)
+        body, _, _, _ = cc.split_document(self.text)
         self.assertIn("Prompt injection was first characterised", body)
         self.assertNotIn("doi:10.1145", body)
 
@@ -139,7 +140,7 @@ class TestSplitDocument(unittest.TestCase):
             "Jones, K. (2021) 'A second paper', Journal of Things. doi:10.1/b\n\n"
             "Patel, R. (2022) 'A third paper', Journal of Things. doi:10.1/c\n"
         )
-        body, block, heading = cc.split_document(text)
+        body, block, heading, entries = cc.split_document(text)
         self.assertIn("Body text", body)
         self.assertEqual(heading, "References")
         self.assertEqual(len(cc.split_entries(block)), 3)
@@ -277,6 +278,13 @@ class TestParseEntry(unittest.TestCase):
         self.assertEqual(ref.accessed, "3 June 2026")
         self.assertNotIn("Accessed", ref.title)
 
+    def test_a_bare_accessed_date_is_lifted_out_too(self):
+        # MLA writes the access date without parentheses, at the end.
+        ref = cc.parse_entry(
+            "Smith, John. *The Book Title*. Publisher, 2020. Accessed 3 Mar. 2021.")
+        self.assertEqual(ref.accessed, "3 Mar. 2021")
+        self.assertNotEqual(ref.year, "2021")
+
     def test_trailing_url_punctuation_is_trimmed(self):
         ref = cc.parse_entry(
             "Example Corp (2024) 'A post'. Available at: https://example.com/post.")
@@ -286,6 +294,29 @@ class TestParseEntry(unittest.TestCase):
         ref = cc.parse_entry(
             "Bradner, S. (1997) Key words for use in RFCs, RFC 2119.")
         self.assertNotIn("RFC 2119", ref.title)
+
+
+class TestUnparsedEntry(unittest.TestCase):
+    """An entry no grammar claims still has to be distinguishable from the
+    next one, and must not be sent off for verification as a paper."""
+
+    def test_numbered_entries_get_distinct_keys(self):
+        a = cc.parse_entry("[1] Technical Committee Report No. 14, Standards Body, London.")
+        b = cc.parse_entry("[2] Technical Committee Report No. 15, Standards Body, London.")
+        self.assertEqual(a.style, "")
+        self.assertNotEqual(a.key, b.key)
+
+    def test_unnumbered_entries_get_distinct_keys(self):
+        a = cc.parse_entry("Technical Committee Report No. 14, Standards Body, London.")
+        b = cc.parse_entry("Technical Committee Report No. 15, Standards Body, London.")
+        self.assertNotEqual(a.key, b.key)
+
+    def test_an_unparsed_entry_is_not_a_paper(self):
+        # 'paper' sends the entry to a Crossref title search, which would
+        # report NOT_FOUND for what is really a parse gap.
+        ref = cc.parse_entry(
+            "Technical Committee Report No. 14. Proceedings of the Standards Body, London.")
+        self.assertNotEqual(ref.kind, "paper")
 
 
 class TestParseChicagoEntry(unittest.TestCase):
@@ -446,6 +477,17 @@ class TestParseVancouverEntry(unittest.TestCase):
         self.assertEqual(ref.title, "A quoted title")
 
 
+class TestVancouverMonthDate(unittest.TestCase):
+    def test_a_month_qualified_date_still_parses(self):
+        # '2020 Jan;' is the NLM form for a monthly journal.
+        ref = cc.parse_entry(
+            "Smith JA, Jones KB. Title of the article here. J Clin Med. "
+            "2020 Jan;15(2):123-45.")
+        self.assertEqual(ref.style, "vancouver")
+        self.assertEqual(ref.year, "2020")
+        self.assertEqual(ref.title, "Title of the article here")
+
+
 class TestNumberedEntryGates(unittest.TestCase):
     def test_numbered_entries_need_no_year(self):
         block = (
@@ -508,6 +550,18 @@ class TestParseMlaEntry(unittest.TestCase):
         self.assertEqual(ref.year, "")
         self.assertEqual(ref.kind, "web")
 
+    def test_a_year_inside_the_title_is_not_the_publication_year(self):
+        ref = cc.parse_entry(
+            'Doe, Jane. "The 2020 Election Explained." Politics Weekly.')
+        self.assertEqual(ref.year, "")
+
+    def test_a_suffixed_year_keeps_its_suffix(self):
+        a = cc.parse_entry("Smith, J. 'A Study of Things', Journal of Things, 2020a.")
+        b = cc.parse_entry("Smith, J. 'Another Study', Journal of Things, 2020b.")
+        self.assertEqual((a.year, a.suffix), ("2020", "a"))
+        self.assertEqual(a.key, "smith|2020a")
+        self.assertNotEqual(a.key, b.key)
+
     def test_an_access_date_is_not_the_publication_year(self):
         ref = cc.parse_entry(
             'Anthropic. "Model Context Protocol Specification." '
@@ -567,6 +621,9 @@ class TestNoteHelpers(unittest.TestCase):
     def test_short_form_surname(self):
         self.assertEqual(cc.note_surname('Greshake, "Not What," 24.'), "Greshake")
 
+    def test_an_apostrophe_is_not_an_opening_quote(self):
+        self.assertEqual(cc.note_surname('O\'Brien, "Some Long Title," 24.'), "O'Brien")
+
     def test_a_shortened_note_is_detected(self):
         ref = cc.parse_entry('Greshake, "Not What," 24.')
         self.assertTrue(cc.is_short_note(ref))
@@ -589,6 +646,13 @@ class TestNoteHelpers(unittest.TestCase):
         short = cc.parse_entry('Greshake, "Not What," 24.')
         self.assertIs(cc.find_note_target(short, [full]), full)
 
+    def test_find_note_target_refuses_a_surname_that_merely_contains_it(self):
+        # 'Lee' is not 'Leeson', however well the titles match.
+        full = cc.parse_entry(
+            'Leeson, Peter. 2019. "Some Long Title Here." Journal of Things.')
+        short = cc.parse_entry('Lee, "Some Long Title Here," 24.')
+        self.assertIsNone(cc.find_note_target(short, [full]))
+
     def test_find_note_target_refuses_a_different_work(self):
         full = cc.parse_entry('Greshake, Kai. "A different paper entirely," Venue, 2023.')
         short = cc.parse_entry('Greshake, "Not What," 24.')
@@ -601,7 +665,9 @@ class TestBuildNoteRefs(unittest.TestCase):
         refs, note_map = cc.build_note_refs(notes, [])
         self.assertEqual(len(refs), 1)
         self.assertEqual(note_map, {1: refs[0].key})
-        self.assertEqual(refs[0].number, 1)
+        # The footnote number is not a reference-list position, so it is not
+        # written into Reference.number, which by_number resolves markers with.
+        self.assertEqual(refs[0].number, 0)
 
     def test_a_note_already_in_the_bibliography_links_instead(self):
         bib = [cc.parse_entry(
