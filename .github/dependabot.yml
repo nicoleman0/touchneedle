@@ -1,0 +1,11 @@
+# GitHub Actions only. There are no runtime dependencies to bump and there are
+# not going to be -- see the note on `dependencies` in pyproject.toml. Pinned
+# action major versions do go stale, though, and that is worth six lines.
+# ruff and mypy are pinned by hand in pyproject.toml's dev group, deliberately:
+# a linter that updates itself reddens CI on unrelated pull requests.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"

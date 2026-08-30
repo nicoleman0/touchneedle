@@ -47,17 +47,17 @@ pip install touchneedle
 As a Claude Code skill:
 
 ```bash
-git clone https://github.com/OWNER/touchneedle ~/.claude/skills/touchneedle
+git clone https://github.com/ncoleman/touchneedle ~/.claude/skills/touchneedle
 ```
 
 Or as a Claude Code plugin:
 
 ```
-/plugin marketplace add OWNER/touchneedle
+/plugin marketplace add ncoleman/touchneedle
 /plugin install touchneedle
 ```
 
-No dependencies beyond Python 3.9+. `pandoc` is needed only for `.docx` input.
+No dependencies beyond Python 3.11+. `pandoc` is needed only for `.docx` input.
 
 Then, in Claude Code: *"check the citations in thesis.docx"*.
 

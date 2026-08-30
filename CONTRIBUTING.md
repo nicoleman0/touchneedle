@@ -29,6 +29,29 @@ python3 -m unittest discover -s tests -t tests
 
 There is nothing to install first.
 
+## Code style
+
+```bash
+pip install --group dev     # ruff and mypy, dev-only
+ruff check .
+mypy scripts/touchneedle.py
+```
+
+Both are gates in CI and both must be clean. They are a dependency *group*, not
+an optional extra, so `pip install touchneedle` can never pull them in -- the
+zero-dependency promise above is unaffected.
+
+`ruff format` is deliberately not used. `build_report()` and `build_claims()`
+assemble Markdown out of hand-aligned list literals, and the formatter reflows
+them into a diff nobody can review. Wrap long lines by hand.
+
+Two things in the parser look like style problems and are not. The regexes that
+build `HEADING`, `BARE_HEADING` and the heading-level search use string
+concatenation rather than an f-string, because their patterns contain `{1,4}`
+quantifiers that an f-string would require doubling -- get one wrong and the
+pattern breaks silently, with the tests still passing on the fixture. Leave them
+as concatenation.
+
 ## Adding a source of authority
 
 Verification routes on what the entry carries — see `verify()`. A new authority

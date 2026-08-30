@@ -1,35 +1,50 @@
 # Releasing
 
-## Swapping the placeholder URL
+## Where the project lives
 
-The public repository URL is not yet fixed, so it appears as the single token
-`OWNER/touchneedle` everywhere it is needed. At publish time, replace it in
-one pass:
+GitHub (`ncoleman/touchneedle`) is canonical, because CI, PyPI trusted
+publishing and the plugin marketplace all resolve against it. Codeberg is a
+**pull mirror**, configured once in Codeberg's own UI (Settings -> Repository ->
+Mirror Settings, "Pull from a remote repository"). Nothing in this repository
+configures it, there is no second CI workflow to keep in step, and a push to
+GitHub turns up on Codeberg without a release step.
+
+Going the other way was considered and rejected: PyPI's trusted publishing only
+mints OIDC tokens for GitHub Actions, so a Codeberg-canonical layout would mean
+storing a long-lived PyPI API token in CI secrets.
+
+The repository URL appears in `scripts/touchneedle.py` (`REPO_URL`, which goes
+out in the HTTP User-Agent, so it has to point somewhere a rate-limited API
+operator can actually reach you), `pyproject.toml` (the project URLs PyPI
+renders on the sidebar), `README.md`, `CHANGELOG.md` and the plugin manifests.
+If it ever moves, rewrite all of them in one pass:
 
 ```bash
-grep -rl 'OWNER/touchneedle' . --exclude-dir=.git \
-  | xargs sed -i 's|OWNER/touchneedle|<your-org>/touchneedle|g'
-grep -rn 'OWNER' . --exclude-dir=.git    # must come back empty
+grep -rl 'ncoleman/touchneedle' . --exclude-dir=.git \
+  | xargs perl -pi -e 's|ncoleman/touchneedle|<new-owner>/touchneedle|g'
 ```
 
-It appears in `scripts/touchneedle.py` (`REPO_URL`, which is sent as part of
-the HTTP User-Agent, so it should point somewhere a rate-limited API operator
-can actually reach you), `pyproject.toml` (the project URLs PyPI renders on the
-sidebar), `README.md`, `CHANGELOG.md` and the plugin manifests.
+`perl -pi -e` rather than `sed -i`: the in-place flag takes a mandatory suffix
+argument on BSD sed and an optional attached one on GNU sed, so any single sed
+invocation is wrong on one platform or the other.
 
 ## Checklist
 
 1. `python3 -m unittest discover -s tests -t tests` — all green.
-2. `bash scripts/sync-plugin-skill.sh` — regenerates the plugin's bundled copy
+2. `pip install --group dev && ruff check . && mypy scripts/touchneedle.py` —
+   both clean. Dev-only tools; the package itself still has no runtime
+   dependencies.
+3. `bash scripts/sync-plugin-skill.sh` — regenerates the plugin's bundled copy
    of the skill and fails if the version numbers have drifted apart.
-3. Bump the version in all four places: `__version__` in
-   `scripts/touchneedle.py`, `version:` in the `SKILL.md` frontmatter,
-   `version` in `plugins/touchneedle/.claude-plugin/plugin.json`, and
-   `version` in `pyproject.toml`. The sync script in step 2 fails if any of
-   them disagree, so run it again after bumping.
-4. Move the `Unreleased` entries in `CHANGELOG.md` under the new version, and
+4. Bump the version in **three** places: `__version__` in
+   `scripts/touchneedle.py`, `version:` in the `SKILL.md` frontmatter, and
+   `version` in `plugins/touchneedle/.claude-plugin/plugin.json`.
+   `pyproject.toml` is **not** one of them — it declares `dynamic = ["version"]`
+   and reads `__version__` straight out of the module, so it cannot drift. Run
+   step 3 again after bumping; it fails if the three disagree.
+5. Move the `Unreleased` entries in `CHANGELOG.md` under the new version, and
    update the link definitions at the bottom.
-5. Tag: `git tag -a v0.1.0 -m 'v0.1.0'` and push the tag.
+6. Tag: `git tag -a v0.1.0 -m 'v0.1.0'` and push the tag.
 
 ## Version numbering
 
@@ -41,7 +56,7 @@ reaches 1.0.
 ## Publishing to PyPI
 
 Set up once, at [pypi.org/manage/account/publishing](https://pypi.org/manage/account/publishing/):
-add a **pending publisher** for project `touchneedle`, owner `<your-org>`,
+add a **pending publisher** for project `touchneedle`, owner `ncoleman`,
 repository `touchneedle`, workflow `publish.yml`, environment `pypi`. Pending is
 the right choice for a project that does not exist on PyPI yet — the first
 successful upload creates it. Do the same on

@@ -8,15 +8,13 @@ arXiv, Crossref, OpenAlex, the IETF datatracker, or the live web -- and reports
 what does not line up. Also cross-checks in-text citations against the list in
 both directions.
 
-Standard library only. Python 3.9+.
+Standard library only. Python 3.11+.
 
   touchneedle.py check  DOC [--out report.md] [--json data.json]
   touchneedle.py claims DOC [--out claims.md]
 
 Exit status is 2 when the run found problems worth a human look, 0 when clean.
 """
-
-from __future__ import annotations
 
 import argparse
 import dataclasses
@@ -34,12 +32,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
 __version__ = "0.1.0"
-# Placeholder owner: swapped for the real one at publish time. One token,
-# repo-wide, so the swap is a single sed -- see RELEASING.md.
-REPO_URL = "https://github.com/OWNER/touchneedle"
+# Goes out in the User-Agent below, so it has to point somewhere a rate-limited
+# API operator can actually reach a human. One token, repo-wide -- see RELEASING.md.
+REPO_URL = "https://github.com/ncoleman/touchneedle"
 UA = f"touchneedle/{__version__} (+{REPO_URL}; academic reference verification)"
 CACHE_TTL = 7 * 24 * 3600
 
@@ -92,10 +91,10 @@ def clean(s: str) -> str:
 
 
 TITLES = r"references|bibliography|works cited|reference list"
-HEADING = re.compile(r"^(#{1,4})\s*(?:\d+[.)]?\s*)?(?:%s)\b.*$" % TITLES, re.I | re.M)
+HEADING = re.compile(r"^(#{1,4})\s*(?:\d+[.)]?\s*)?(?:" + TITLES + r")\b.*$", re.I | re.M)
 # A .docx whose Word style never mapped to a heading level leaves the word
 # sitting on a line of its own, sometimes bold or underlined.
-BARE_HEADING = re.compile(r"^[ \t]*[*_]{0,2}(?:%s)[*_:]{0,2}[ \t]*$" % TITLES, re.I | re.M)
+BARE_HEADING = re.compile(r"^[ \t]*[*_]{0,2}(?:" + TITLES + r")[*_:]{0,2}[ \t]*$", re.I | re.M)
 
 
 def split_document(text: str) -> tuple[str, str]:
@@ -112,7 +111,7 @@ def split_document(text: str) -> tuple[str, str]:
     for match in reversed(candidates):
         level = len(match.group(1)) if match.re is HEADING else 1
         rest = text[match.end():]
-        nxt = re.search(r"^#{1,%d}\s+\S" % level, rest, re.M)
+        nxt = re.search(r"^#{1," + str(level) + r"}\s+\S", rest, re.M)
         block = rest[: nxt.start()] if nxt else rest
         if len(split_entries(block)) >= 3:
             return text[: match.start()], block
@@ -385,7 +384,7 @@ def match_citations(refs: list[Reference], cites: list[Citation]) -> list[Citati
 
 class Fetcher:
     def __init__(self, cache_dir: str, timeout: int = 25, offline: bool = False,
-                 mailto: Optional[str] = None, delay: float = 0.4):
+                 mailto: str | None = None, delay: float = 0.4):
         self.cache_dir = cache_dir
         self.timeout = timeout
         self.offline = offline
@@ -394,12 +393,14 @@ class Fetcher:
         self.last = 0.0
         os.makedirs(cache_dir, exist_ok=True)
 
-    def get(self, url: str, accept: Optional[str] = None, max_bytes: int = 400_000) -> dict:
+    def get(self, url: str, accept: str | None = None,
+            max_bytes: int = 400_000) -> dict[str, Any]:
         path = os.path.join(self.cache_dir, hashlib.sha256(
             (url + (accept or "")).encode()).hexdigest() + ".json")
         if os.path.exists(path) and time.time() - os.path.getmtime(path) < CACHE_TTL:
             with open(path, encoding="utf-8") as fh:
-                return json.load(fh)
+                cached: dict[str, Any] = json.load(fh)
+            return cached
         if self.offline:
             return {"ok": False, "status": None, "error": "offline", "body": "", "final_url": url}
 
@@ -431,7 +432,7 @@ class Fetcher:
             json.dump(rec, fh)
         return rec
 
-    def json(self, url: str) -> Optional[Any]:
+    def json(self, url: str) -> Any | None:
         rec = self.get(url, accept="application/json")
         if not rec["ok"]:
             return None
@@ -466,7 +467,7 @@ def author_present(surname: str, authors: Iterable[str]) -> bool:
 # --------------------------------------------------------------------------
 
 def check_metadata(ref: Reference, found_title: str, found_authors: list[str],
-                   found_year: Optional[str], source: str) -> None:
+                   found_year: str | None, source: str) -> None:
     """Compare a retrieved record against the reference and set status/notes."""
     score = title_score(ref.title, found_title)
     ref.evidence.append(f"{source}: \u201c{found_title[:140]}\u201d"
@@ -514,7 +515,7 @@ def verify_arxiv(ref: Reference, f: Fetcher) -> bool:
     return True
 
 
-def crossref_record(item: dict) -> tuple[str, list[str], Optional[str]]:
+def crossref_record(item: dict[str, Any]) -> tuple[str, list[str], str | None]:
     title = (item.get("title") or [""])[0]
     authors = [" ".join(filter(None, [a.get("given"), a.get("family")]))
                for a in item.get("author", [])]
@@ -539,7 +540,7 @@ def verify_by_title(ref: Reference, f: Fetcher) -> bool:
     if not ref.title:
         return False
     q = urllib.parse.quote(ref.title[:250])
-    best: tuple[float, str, list[str], Optional[str], str] = (0.0, "", [], None, "")
+    best: tuple[float, str, list[str], str | None, str] = (0.0, "", [], None, "")
 
     data = f.json(f"https://api.crossref.org/works?query.bibliographic={q}&rows=5"
                   + (f"&mailto={urllib.parse.quote(f.mailto)}" if f.mailto else ""))
@@ -563,8 +564,9 @@ def verify_by_title(ref: Reference, f: Fetcher) -> bool:
 
     if best[0] < 0.55:
         ref.status = "NOT_FOUND"
-        ref.notes.append("no close title match in Crossref or OpenAlex"
-                         + (f" (best {best[0]:.2f}: \u201c{best[1][:90]}\u201d)" if best[1] else ""))
+        ref.notes.append(
+            "no close title match in Crossref or OpenAlex"
+            + (f" (best {best[0]:.2f}: \u201c{best[1][:90]}\u201d)" if best[1] else ""))
         return True
     check_metadata(ref, best[1], best[2], best[3], best[4])
     return True
@@ -583,9 +585,11 @@ def verify_rfc(ref: Reference, f: Fetcher) -> bool:
         ref.notes.append(f"RFC {ref.rfc} not retrievable from datatracker or rfc-editor")
         return True
     head = rec["body"][:4000]
-    if ref.title and title_score(ref.title, head) < 0.10 and normalise(ref.title)[:40] not in normalise(head):
+    if (ref.title and title_score(ref.title, head) < 0.10
+            and normalise(ref.title)[:40] not in normalise(head)):
         ref.status = "PARTIAL"
-        ref.notes.append(f"RFC {ref.rfc} exists but its text does not obviously contain the cited title")
+        ref.notes.append(f"RFC {ref.rfc} exists but its text does not obviously "
+                         "contain the cited title")
     else:
         ref.status = "VERIFIED"
     ref.evidence.append(f"rfc-editor: rfc{ref.rfc}.txt retrieved")
@@ -716,7 +720,8 @@ def build_report(refs: list[Reference], cites: list[Citation], doc: str,
 
     L = [f"# Citation check \u2014 {os.path.basename(doc)}", "",
          f"Run {time.strftime('%Y-%m-%d %H:%M')}"
-         + ("  \u2014 **offline mode, nothing was verified against a live source**" if offline else ""),
+         + ("  \u2014 **offline mode, nothing was verified against a live source**"
+            if offline else ""),
          "", f"{len(refs)} reference entries, {len(cites)} in-text citation instances.", "",
          "## Summary", "", "| Status | Count | Meaning |", "|---|---:|---|"]
     meaning = {
@@ -822,10 +827,8 @@ def build_claims(refs: list[Reference], cites: list[Citation], doc: str) -> str:
          "supports the sentence: **SUPPORTED / PARTIAL / UNSUPPORTED / INACCESSIBLE**. "
          "Do not guess \u2014 if the source cannot be read, say INACCESSIBLE.", ""]
     ordered = sorted(cites, key=lambda c: (c.key or "zzz", c.year))
-    n = 0
-    for c in ordered:
+    for n, c in enumerate(ordered, 1):
         r = by_key.get(c.key)
-        n += 1
         L += [f"## {n}. {c.name} ({c.year}{c.suffix}) \u2014 {c.form}", ""]
         if r:
             src = r.url or (f"arXiv:{r.arxiv}" if r.arxiv else "") or (

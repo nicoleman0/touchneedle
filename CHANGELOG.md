@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking: minimum Python is now 3.11**, up from 3.9. 3.9 reached end of life
+  in October 2025 and current mypy will not target it, so type checking was not
+  possible while it was still the floor. `from __future__ import annotations` is
+  gone with it, and the CI matrix now runs 3.11, 3.13 and 3.14.
+- The version number is maintained in three places rather than four.
+  `pyproject.toml` declares `dynamic = ["version"]` and reads `__version__` out
+  of the module, so it can no longer drift. `scripts/sync-plugin-skill.sh` lost
+  the regex that parsed it, and with it the workaround for `tomllib` not
+  existing before 3.11.
+
+### Added
+
+- ruff and mypy as CI gates, configured in `pyproject.toml` and installed from a
+  `[dependency-groups]` dev group. A group cannot be pulled in by
+  `pip install touchneedle[...]`, so the package still declares zero runtime
+  dependencies. mypy runs with `strict = true` and is clean.
+- Dependabot for GitHub Actions.
+
+### Fixed
+
+- `build_claims()` counts rows with `enumerate()` instead of a hand-maintained
+  counter. No change to output.
+
+
 ## [0.1.0] — 2026-08-30
 
 First public release. The checker was written and used to verify the
@@ -51,5 +77,5 @@ Both found while writing the test suite for this release:
 - The list of in-text citations with no matching entry has expected false
   positives, because a regex cannot tell `(Smith, 2024)` from `(ICLR 2023)`.
 
-[Unreleased]: https://github.com/OWNER/touchneedle/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/OWNER/touchneedle/releases/tag/v0.1.0
+[Unreleased]: https://github.com/ncoleman/touchneedle/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ncoleman/touchneedle/releases/tag/v0.1.0

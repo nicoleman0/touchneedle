@@ -9,15 +9,15 @@ permissions:
   contents: read
 
 jobs:
-  # The matrix exists to hold the README's "Python 3.9+" claim honest. If you
-  # turn on branch protection, pin all of these job names as required checks --
-  # a matrix job that is not listed is not enforced.
+  # The matrix exists to hold the README's "Python 3.11+" claim honest: floor,
+  # middle, and newest. If you turn on branch protection, pin all of these job
+  # names as required checks -- a matrix job that is not listed is not enforced.
   test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.11", "3.13"]
+        python-version: ["3.11", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
 
@@ -38,6 +38,29 @@ jobs:
           python scripts/touchneedle.py claims tests/fixtures/sample.md \
             --out /tmp/claims.md
           grep -q '8 reference entries' /tmp/report.md
+
+  # Dev-only tooling, installed here and nowhere else -- the package itself
+  # still has zero runtime dependencies, and the `test` job above deliberately
+  # installs nothing so a dependency creeping in breaks the build.
+  # `ruff check` only, never `ruff format`: see the note in pyproject.toml.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # --group needs pip 25.1+; upgrading is cheaper than debugging a runner
+      # image that shipped an older one.
+      - name: Install ruff and mypy
+        run: |
+          python -m pip install --upgrade pip
+          pip install --group dev
+
+      - run: ruff check .
+      - run: mypy scripts/touchneedle.py
 
   sync:
     runs-on: ubuntu-latest
