@@ -11,7 +11,9 @@
       "source": "./plugins/touchneedle",
       "description": "Verify that every citation and reference in a document is real, accurately described, and consistently used. Checks entries against arXiv, Crossref, OpenAlex, the IETF datatracker and the live web, then drives a claim-support pass over each source.",
       "category": "productivity",
-      "keywords": ["citations", "references", "bibliography", "academic", "fact-checking"]
+      "keywords": ["citations", "references", "bibliography", "academic", "fact-checking",
+        "citation-checker", "hallucination", "llm", "ai-generated", "crossref",
+        "doi", "arxiv", "pandoc", "docx", "markdown", "research-integrity"]
     }
   ]
 }

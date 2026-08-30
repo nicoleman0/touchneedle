@@ -1,9 +1,17 @@
 # touchneedle
 
-Citiation tool that verifies the citations in a document are real,
-accurately described, and consistently used.
+[![PyPI](https://img.shields.io/pypi/v/touchneedle)](https://pypi.org/project/touchneedle/)
+[![Python versions](https://img.shields.io/pypi/pyversions/touchneedle)](https://pypi.org/project/touchneedle/)
+[![Tests](https://github.com/nicoleman0/touchneedle/actions/workflows/test.yml/badge.svg)](https://github.com/nicoleman0/touchneedle/actions/workflows/test.yml)
+[![Licence](https://img.shields.io/pypi/l/touchneedle)](LICENSE)
 
-Useful for both students and examiners who wish to corroborate citations.
+Verifies that the citations in a document are real, accurately described, and
+consistently used — including the fabricated-citation signature an AI-drafted
+bibliography produces: a real title carrying the wrong authors, or a plausible
+reference to a paper that does not exist.
+
+Useful for students and examiners, and for anyone checking a reference list a
+model wrote.
 
 It works standalone, or as a coding agent skill.
 
@@ -47,6 +55,40 @@ emits a worklist pairing each in-text citation with the sentence making the clai
 and a locator for the source; the model then reads each source and rules
 SUPPORTED / PARTIAL / UNSUPPORTED / INACCESSIBLE. This catches the failure the
 database checks cannot: a genuine source attached to a claim it does not make.
+
+## What it produces
+
+A Markdown report, worst findings first. From the test fixture, run live:
+
+```markdown
+## Entries needing attention
+
+### STALE — IETF (2025a)
+
+> IETF (2025a) 'The OAuth 2.1 Authorization Framework', Internet-Draft draft-ietf-oauth-v2-1-13.
+
+- cited as -13 but the current revision is -15; an Internet-Draft is a moving
+  target, so confirm the cited text survived
+
+### NOT_FOUND — Uncited (2021)
+
+> Uncited, A. (2021) 'A paper that nobody in this document cites', Journal of
+> Irreproducible Results. doi:10.1000/uncited.
+
+- Crossref has no record for DOI 10.1000/uncited
+
+## Cross-reference consistency
+
+### In-text citations with no matching reference entry
+
+- `Nonexistent (2019)` — …An orphan citation appears here (Nonexistent, 2019).…
+```
+
+[The full report](docs/example-report.md) — five entries verified against arXiv,
+Crossref and the IETF datatracker, one link that has quietly moved, and the
+cross-reference pass in both directions.
+
+`--json` writes the same results machine-readably, for a CI step or a dashboard.
 
 ## Install
 
