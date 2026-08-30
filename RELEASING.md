@@ -36,13 +36,13 @@ invocation is wrong on one platform or the other.
    both clean. Dev-only tools; the package itself still has no runtime
    dependencies.
 3. `bash scripts/sync-plugin-skill.sh` — regenerates the plugin's bundled copy
-   of the skill and fails if the version numbers have drifted apart.
-4. Bump the version in **three** places: `__version__` in
-   `scripts/touchneedle.py`, `version:` in the `SKILL.md` frontmatter, and
-   `version` in `plugins/touchneedle/.claude-plugin/plugin.json`.
-   `pyproject.toml` is **not** one of them — it declares `dynamic = ["version"]`
-   and reads `__version__` straight out of the module, so it cannot drift. Run
-   step 3 again after bumping; it fails if the three disagree.
+   of the skill and stamps the current `__version__` into the `SKILL.md`
+   frontmatter and the plugin manifest.
+4. Bump `__version__` in `scripts/touchneedle.py` — the single source of
+   truth. `pyproject.toml` reads it straight out of the module
+   (`dynamic = ["version"]`), and step 3's script stamps it into the `SKILL.md`
+   frontmatter and the plugin manifest, so nothing else is edited by hand. Run
+   step 3 again after bumping to propagate it.
 5. Move the `Unreleased` entries in `CHANGELOG.md` under the new version, and
    update the link definitions at the bottom.
 6. Tag: `git tag -a v0.1.0 -m 'v0.1.0'` and push the tag.

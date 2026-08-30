@@ -67,13 +67,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Fails if the plugin's bundled skill has drifted from the canonical root
-      # copy, or if the three version numbers disagree.
+      # Fails if any generated file is stale: the plugin's bundled skill, or a
+      # version stamp behind __version__ in scripts/touchneedle.py.
       - name: Plugin skill is in sync
         run: |
           bash scripts/sync-plugin-skill.sh
           if ! git diff --quiet; then
-            echo "::error::plugins/ is stale -- run scripts/sync-plugin-skill.sh and commit"
+            echo "::error::generated files are stale -- run scripts/sync-plugin-skill.sh and commit"
             git diff --stat
             exit 1
           fi
