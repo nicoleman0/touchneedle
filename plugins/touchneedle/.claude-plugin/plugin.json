@@ -1,6 +1,6 @@
 {
   "name": "touchneedle",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Verify that every citation and reference in a document is real, accurately described, and consistently used.",
   "author": {
     "name": "ncoleman"

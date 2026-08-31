@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-08-31
+
+Every entry below is the same defect: the checker reporting a coverage gap of
+its own as a finding about someone's citation. Each was found by running the
+tool over real bibliographies rather than over the fixtures, and each was
+confirmed against the upstream API before being called a bug.
+
 ### Changed
 
 - `--mailto` is documented as what it is: OpenAlex rate-limits anonymous search
@@ -248,7 +255,8 @@ Both found while writing the test suite for this release:
 - The list of in-text citations with no matching entry has expected false
   positives, because a regex cannot tell `(Smith, 2024)` from `(ICLR 2023)`.
 
-[Unreleased]: https://github.com/nicoleman0/touchneedle/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/nicoleman0/touchneedle/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.2.2
 [0.2.1]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.2.1
 [0.2.0]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.2.0
 [0.1.0]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.1.0
