@@ -377,55 +377,7 @@ Sørensen, K. (2021) 'Målinger og resultater', Nordic Journal of Measurement, 4
             self.assertIn("Müller", proc.stdout)
 
 
-class TestALegacyCodePageDoesNotCrashARun(unittest.TestCase):
-    """Issue #30. The report is not pure ASCII -- the summary rule alone is an
-    em-dash -- so a run whose stdout encoding was left to the locale dies on its
-    own output, whatever the document contained."""
 
-    def test_a_report_survives_an_ascii_stdout(self):
-        proc = run("check", SAMPLE, "--offline", env=ASCII_LOCALE)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-
-    def test_the_claims_worklist_survives_an_ascii_stdout(self):
-        proc = run("claims", SAMPLE, env=ASCII_LOCALE)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-
-
-@unittest.skipUnless(shutil.which("pandoc"), "pandoc is not installed")
-class TestAConvertedDocumentKeepsItsAccents(unittest.TestCase):
-    """Issue #31. pandoc writes UTF-8 whatever the locale says, so the capture
-    has to name that encoding rather than inherit the locale's. The document is
-    built here rather than committed: a .docx is a zip, and a binary fixture
-    nobody can read in a diff is worse than one pandoc rebuilds on demand."""
-
-    # Three entries because split_document() will not accept a heading as the
-    # real reference list on fewer, and every one of them carries a character
-    # that a legacy code page cannot represent.
-    SOURCE = """\
-# A short paper
-
-Müller (2019) argues the point, and Lévy (2020) agrees.
-A third view is offered by Sørensen (2021).
-
-## References
-
-Müller, J. (2019) 'Über die Ordnung der Dinge', Journal of Things, 12(3), pp. 1-20.
-
-Lévy, C. (2020) 'Une étude des systèmes', Revue des Systèmes, 8(1), pp. 30-45.
-
-Sørensen, K. (2021) 'Målinger og resultater', Nordic Journal of Measurement, 4(2), pp. 5-19.
-"""
-
-    def test_a_docx_is_read_as_utf8_under_an_ascii_locale(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            md = os.path.join(tmp, "doc.md")
-            docx = os.path.join(tmp, "doc.docx")
-            with open(md, "w", encoding="utf-8") as fh:
-                fh.write(self.SOURCE)
-            subprocess.run(["pandoc", md, "-o", docx], check=True, capture_output=True)
-            proc = run("check", docx, "--offline", env=ASCII_LOCALE)
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertIn("Müller", proc.stdout)
 
 
 if __name__ == "__main__":

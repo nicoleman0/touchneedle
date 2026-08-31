@@ -18,10 +18,10 @@ Exit status is 2 when the run found problems worth a human look, 0 when clean.
 """
 
 import argparse
-import io
 import dataclasses
 import difflib
 import hashlib
+import io
 import json
 import os
 import re
