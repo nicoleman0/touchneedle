@@ -6,11 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-31
+
+Windows. A reference list carrying a name outside the console's code page
+brought the run down, and a `.docx` came back mangled, which between them cover
+most of what the tool is pointed at on that platform. Both are fixed here, and
+both are now covered by tests that fail without the fix.
+
 ### Added
 
 - `--version` prints the version and exits. `__version__` in the module is
   already the single source of truth, so the flag reads it rather than
   restating it.
+
+### Fixed
+
+- A report is no longer written in whatever encoding the locale happens to
+  offer. `stdout` and `stderr` are set to UTF-8 at startup, so a name the
+  console's code page cannot represent no longer ends the run with a
+  `UnicodeEncodeError`. cp1252 covers `Müller` and `Sørensen`, which is why
+  this went unnoticed for so long; a Greek or Polish name did not survive it.
+- A `.docx`, `.odt` or `.rtf` converted through pandoc is read as UTF-8 rather
+  than in the locale's encoding. pandoc writes UTF-8 whatever the locale says,
+  so on a Windows checkout the conversion came back mangled or raised outright
+  — on the input format the tool is most often pointed at.
 
 ## [0.2.2] — 2026-08-31
 
@@ -261,7 +280,8 @@ Both found while writing the test suite for this release:
 - The list of in-text citations with no matching entry has expected false
   positives, because a regex cannot tell `(Smith, 2024)` from `(ICLR 2023)`.
 
-[Unreleased]: https://github.com/nicoleman0/touchneedle/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/nicoleman0/touchneedle/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.3.0
 [0.2.2]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.2.2
 [0.2.1]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.2.1
 [0.2.0]: https://github.com/nicoleman0/touchneedle/releases/tag/v0.2.0
