@@ -20,6 +20,36 @@ def run(*args):
                           capture_output=True, text=True)
 
 
+class TestUncheckedEntriesAreAnnounced(unittest.TestCase):
+    """A run where nobody could reach the authorities must not read as a pass."""
+
+    def refs(self):
+        r = cc.parse_entry("Smith, J. (2020) 'A paper about things', Journal of Things.")
+        r.status, r.unchecked = "UNVERIFIABLE", True
+        r.notes.append("could not search OpenAlex (HTTP 429)")
+        return [r]
+
+    def test_the_summary_says_they_were_not_checked(self):
+        report = cc.build_report(self.refs(), [], "doc.md", offline=False)
+        self.assertIn("could not be checked at all", report)
+        self.assertNotIn("**No entry failed verification.**\n\n## Entries", report)
+
+    def test_the_mailto_remedy_is_offered_when_no_address_was_given(self):
+        report = cc.build_report(self.refs(), [], "doc.md", offline=False)
+        self.assertIn("--mailto", report)
+
+    def test_the_remedy_is_not_repeated_at_someone_already_using_it(self):
+        report = cc.build_report(self.refs(), [], "doc.md", offline=False, polite=True)
+        self.assertIn("could not be checked at all", report)
+        self.assertNotIn("--mailto", report)
+
+    def test_a_clean_run_says_nothing_about_unchecked_entries(self):
+        r = cc.parse_entry("Smith, J. (2020) 'A paper about things', Journal of Things.")
+        r.status = "VERIFIED"
+        self.assertNotIn("could not be checked at all",
+                         cc.build_report([r], [], "doc.md", offline=False))
+
+
 class TestCheckCommand(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

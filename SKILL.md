@@ -37,7 +37,12 @@ must be on PATH). Options:
   mostly changes the in-text finders and the report wording.
 - `--mailto you@example.com` — sent to Crossref and OpenAlex for their polite
   rate-limit pool. Optional and off by default. **Never pass the user's address
-  without asking them first** — it goes to third-party services.
+  without asking them first** — it goes to third-party services. Worth asking
+  for, though: OpenAlex rate-limits anonymous search when it is busy, and it is
+  the fallback covering venues Crossref does not index, so without an address a
+  run can come back with entries unchecked rather than verified. If the report
+  says entries could not be checked, offering to re-run with `--mailto` is the
+  fix.
 - `--cache DIR` — HTTP cache, default `.touchneedle-cache`, 7-day TTL. Re-runs are
   nearly free, so iterate freely.
 

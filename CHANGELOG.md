@@ -6,8 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `--mailto` is documented as what it is: OpenAlex rate-limits anonymous search
+  when it is busy, and OpenAlex is the fallback covering the venues Crossref
+  does not index, so without a contact address those entries come back
+  unchecked rather than verified. It stays off by default and is still never
+  inferred.
+
 ### Fixed
 
+- A run in which authorities could not be reached no longer reads as a pass.
+  The report counts the entries nothing was decided about, says so directly
+  under the summary, and points at `--mailto` when no address was supplied.
+  `UNVERIFIABLE` no longer claims there was "nothing checkable in the entry"
+  when the truth is that the check could not be run.
 - A record found by title search is no longer treated as the cited work. A
   search returns neighbours, and `title_score` gives a containing title full
   marks, so "Is Attention All You Need?" scored 1.00 against the paper it is
