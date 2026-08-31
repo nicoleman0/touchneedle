@@ -20,6 +20,13 @@ def run(*args):
                           capture_output=True, text=True)
 
 
+class TestVersionFlag(unittest.TestCase):
+    def test_version_flag_prints_version_and_exits_zero(self):
+        proc = run("--version")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(cc.__version__, proc.stdout)
+
+
 class TestUncheckedEntriesAreAnnounced(unittest.TestCase):
     """A run where nobody could reach the authorities must not read as a pass."""
 
