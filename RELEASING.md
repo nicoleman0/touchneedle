@@ -31,10 +31,21 @@ invocation is wrong on one platform or the other.
 
 ## Checklist
 
+`main` is protected — "changes must be made through a pull request" — so the
+version bump and the changelog move land as a branch and a PR like any other
+work, and the tag is cut from `main` after that merges. A direct push is
+rejected with `GH013`, after the commit already exists locally; move it to a
+branch rather than trying to force it through.
+
+Which installer the commands below use depends on how the checkout's
+virtualenv was made. A `uv venv` has no `pip` in it, so `python -m pip` and
+`python -m build` both fail with `No module named pip`; the `uv` forms work
+either way and are given first.
+
 1. `python3 -m unittest discover -s tests -t tests` — all green.
-2. `pip install --group dev && ruff check . && mypy scripts/touchneedle.py` —
-   both clean. Dev-only tools; the package itself still has no runtime
-   dependencies.
+2. `uv pip install --group dev` (or `pip install --group dev`), then
+   `ruff check . && mypy scripts/touchneedle.py` — both clean. Dev-only tools;
+   the package itself still has no runtime dependencies.
 3. `bash scripts/sync-plugin-skill.sh` — regenerates the plugin's bundled copy
    of the skill and stamps the current `__version__` into the `SKILL.md`
    frontmatter and the plugin manifest.
@@ -45,7 +56,8 @@ invocation is wrong on one platform or the other.
    step 3 again after bumping to propagate it.
 5. Move the `Unreleased` entries in `CHANGELOG.md` under the new version, and
    update the link definitions at the bottom.
-6. Tag: `git tag -a v0.1.0 -m 'v0.1.0'` and push the tag.
+6. Tag from `main`, after the pull request has merged:
+   `git tag -a vX.Y.Z -m 'vX.Y.Z'`, then push the tag.
 
 ## Version numbering
 
@@ -60,7 +72,10 @@ Set up once, at [pypi.org/manage/account/publishing](https://pypi.org/manage/acc
 add a **pending publisher** for project `touchneedle`, owner `nicoleman0`,
 repository `touchneedle`, workflow `publish.yml`, environment `pypi`. Pending is
 the right choice for a project that does not exist on PyPI yet — the first
-successful upload creates it. Do the same on
+successful upload creates it, and the pending publisher becomes an ordinary one.
+That has already happened here, so this is setup history rather than a step: the
+publisher exists and needs no attention unless the workflow file, the repository
+or the owner is renamed. Do the same on
 [test.pypi.org](https://test.pypi.org/manage/account/publishing/) if you want a
 rehearsal first.
 
@@ -73,14 +88,30 @@ Then publishing is: push the tag, cut a GitHub release from it, and
 ### Before you tag
 
 ```bash
-python -m build
-python -m twine check dist/*
-pip install --force-reinstall dist/touchneedle-*.whl
-touchneedle check tests/fixtures/sample.md --offline --out /tmp/r.md
+uv build                                    # or `python -m build`
+uvx twine check dist/*                      # or `python -m twine check dist/*`
+uv run --no-project --with ./dist/touchneedle-*.whl \
+  touchneedle check tests/fixtures/sample.md --offline --out /tmp/r.md
 ```
 
 Confirm the installed console script works, not just the checkout — the entry
-point is the part that silently breaks.
+point is the part that silently breaks. `uv run --with` builds a throwaway
+environment for the check, which is why it is preferred over
+`pip install --force-reinstall`: the latter leaves the release wheel installed
+in the working virtualenv, where it shadows the checkout on the next run.
+
+### After the release
+
+The publish workflow finishing is not the same as the release being installable.
+PyPI's simple index updates first; the JSON API and resolvers such as `uv` and
+`pip` can lag it by a few minutes, so a `No solution found` for the version you
+just published means the CDN has not caught up, not that the upload failed.
+Confirm with the index, then install:
+
+```bash
+curl -s https://pypi.org/simple/touchneedle/ | grep touchneedle-X.Y.Z
+uv run --no-project --with touchneedle==X.Y.Z touchneedle --help
+```
 
 **A version number on PyPI is permanent.** It cannot be re-uploaded or
 overwritten, only yanked and superseded. Get the tag right before you cut the
