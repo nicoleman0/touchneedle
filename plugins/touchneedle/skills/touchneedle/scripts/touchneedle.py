@@ -1620,6 +1620,7 @@ def collect(doc: str, style: str = "auto") -> tuple[list[Reference], list[Citati
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--version", action="version", version=__version__)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     for name in ("check", "claims"):
