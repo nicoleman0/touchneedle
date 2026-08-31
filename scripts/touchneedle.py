@@ -25,6 +25,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -893,6 +894,30 @@ def match_citations(refs: list[Reference], cites: list[Citation],
 # HTTP with an on-disk cache
 # --------------------------------------------------------------------------
 
+# A server answering 404 or 410 has told us the record is not there, and that
+# is evidence about the citation. Anything else that goes wrong -- a rate limit,
+# a timeout, a 5xx, a TLS failure -- is our side of the conversation failing,
+# and says nothing at all about the entry. Reporting it as a finding accuses a
+# citation of being wrong because someone else's server was busy.
+DEFINITIVE_ABSENCE = (404, 410)
+
+
+def lookup_failed(rec: dict[str, Any]) -> bool:
+    """Did this request fail in a way that says nothing about the target?"""
+    if rec["ok"]:
+        return False
+    status = rec.get("status")
+    if status in DEFINITIVE_ABSENCE:
+        return False
+    if status is None:
+        # Transport level. A hostname that does not resolve is a real finding;
+        # a timeout or a TLS error is not. Cache records written before this
+        # flag existed are read the safe way -- as a failure, not a finding.
+        transient: bool = rec.get("transient", True)
+        return transient
+    return True                 # 429, 5xx, and anything else unexpected
+
+
 class Fetcher:
     def __init__(self, cache_dir: str, timeout: int = 25, offline: bool = False,
                  mailto: str | None = None, delay: float = 0.4):
@@ -937,20 +962,32 @@ class Fetcher:
             rec = {"ok": False, "status": e.code, "body": "", "final_url": url,
                    "error": f"HTTP {e.code}"}
         except Exception as e:                          # timeouts, DNS, TLS, redirect loops
+            reason = getattr(e, "reason", None)
             rec = {"ok": False, "status": None, "body": "", "final_url": url,
-                   "error": f"{type(e).__name__}: {e}"}
+                   "error": f"{type(e).__name__}: {e}",
+                   # A name that does not resolve is a dead link. A timeout is
+                   # our problem, not the link's.
+                   "transient": not isinstance(reason, socket.gaierror)}
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(rec, fh)
         return rec
 
-    def json(self, url: str) -> Any | None:
+    def json(self, url: str) -> tuple[Any | None, str | None]:
+        """(parsed body, the reason the lookup did not happen).
+
+        A reason of None means the server answered -- with the JSON, or with a
+        definitive 'no such record'. A reason means the question was never put,
+        and the caller must not turn that into a finding about the citation.
+        """
         rec = self.get(url, accept="application/json")
-        if not rec["ok"]:
-            return None
-        try:
-            return json.loads(rec["body"])
-        except json.JSONDecodeError:
-            return None
+        if rec["ok"]:
+            try:
+                return json.loads(rec["body"]), None
+            except json.JSONDecodeError:
+                return None, "unreadable response"
+        if lookup_failed(rec):
+            return None, rec["error"] or f"HTTP {rec['status']}"
+        return None, None
 
 
 # --------------------------------------------------------------------------
@@ -1036,7 +1073,13 @@ def crossref_record(item: dict[str, Any]) -> tuple[str, list[str], str | None]:
 
 
 def verify_doi(ref: Reference, f: Fetcher) -> bool:
-    data = f.json(f"https://api.crossref.org/works/{urllib.parse.quote(ref.doi)}")
+    data, unreachable = f.json(
+        f"https://api.crossref.org/works/{urllib.parse.quote(ref.doi)}")
+    if unreachable:
+        # No verdict: hand the entry to the next route rather than accuse it.
+        ref.notes.append(f"Crossref could not be reached ({unreachable}), "
+                         f"so DOI {ref.doi} was not checked")
+        return False
     if not data or "message" not in data:
         ref.status = "NOT_FOUND"
         ref.notes.append(f"Crossref has no record for DOI {ref.doi}")
@@ -1052,39 +1095,64 @@ def verify_by_title(ref: Reference, f: Fetcher) -> bool:
         return False
     q = urllib.parse.quote(ref.title[:250])
     best: tuple[float, str, list[str], str | None, str] = (0.0, "", [], None, "")
+    answered: list[str] = []            # authorities that actually searched
+    silent: list[str] = []              # and those that could not be reached
 
-    data = f.json(f"https://api.crossref.org/works?query.bibliographic={q}&rows=5"
-                  + (f"&mailto={urllib.parse.quote(f.mailto)}" if f.mailto else ""))
-    for item in ((data or {}).get("message", {}) or {}).get("items", []):
-        title, authors, year = crossref_record(item)
-        s = title_score(ref.title, title)
-        if s > best[0]:
-            best = (s, title, authors, year, f"Crossref ({item.get('DOI', 'no DOI')})")
-
-    if best[0] < 0.85:
-        data = f.json(f"https://api.openalex.org/works?per-page=5&filter=title.search:{q}"
-                      + (f"&mailto={urllib.parse.quote(f.mailto)}" if f.mailto else ""))
-        for item in (data or {}).get("results", []):
-            title = item.get("display_name") or ""
-            authors = [a.get("author", {}).get("display_name", "")
-                       for a in item.get("authorships", [])]
-            year = str(item.get("publication_year")) if item.get("publication_year") else None
+    data, unreachable = f.json(
+        f"https://api.crossref.org/works?query.bibliographic={q}&rows=5"
+        + (f"&mailto={urllib.parse.quote(f.mailto)}" if f.mailto else ""))
+    if unreachable:
+        silent.append(f"Crossref ({unreachable})")
+    else:
+        answered.append("Crossref")
+        for item in ((data or {}).get("message", {}) or {}).get("items", []):
+            title, authors, year = crossref_record(item)
             s = title_score(ref.title, title)
             if s > best[0]:
-                best = (s, title, authors, year, "OpenAlex")
+                best = (s, title, authors, year, f"Crossref ({item.get('DOI', 'no DOI')})")
 
+    if best[0] < 0.85:
+        data, unreachable = f.json(
+            f"https://api.openalex.org/works?per-page=5&filter=title.search:{q}"
+            + (f"&mailto={urllib.parse.quote(f.mailto)}" if f.mailto else ""))
+        if unreachable:
+            silent.append(f"OpenAlex ({unreachable})")
+        else:
+            answered.append("OpenAlex")
+            for item in (data or {}).get("results", []):
+                title = item.get("display_name") or ""
+                authors = [a.get("author", {}).get("display_name", "")
+                           for a in item.get("authorships", [])]
+                year = str(item.get("publication_year")) if item.get("publication_year") else None
+                s = title_score(ref.title, title)
+                if s > best[0]:
+                    best = (s, title, authors, year, "OpenAlex")
+
+    if silent:
+        # Say which search did not run, whatever the outcome: a reader deciding
+        # how much to trust this line needs to know what was actually asked.
+        ref.notes.append("could not search " + " and ".join(silent))
     if best[0] < 0.55:
+        if silent:
+            return False        # a search that never ran is not evidence
         ref.status = "NOT_FOUND"
         ref.notes.append(
-            "no close title match in Crossref or OpenAlex"
+            f"no close title match in {' or '.join(answered)}"
             + (f" (best {best[0]:.2f}: \u201c{best[1][:90]}\u201d)" if best[1] else ""))
         return True
     check_metadata(ref, best[1], best[2], best[3], best[4])
+    if silent and ref.status in PROBLEM_STATUSES:
+        # A weak match from the one source that answered is not enough to
+        # condemn an entry when the second opinion never arrived.
+        ref.status = "PARTIAL"
+        ref.notes.append("recorded as unconfirmed rather than wrong, because "
+                         "not every source could be consulted")
     return True
 
 
 def verify_rfc(ref: Reference, f: Fetcher) -> bool:
-    data = f.json(f"https://datatracker.ietf.org/api/v1/doc/document/rfc{ref.rfc}/?format=json")
+    data, unreachable = f.json(
+        f"https://datatracker.ietf.org/api/v1/doc/document/rfc{ref.rfc}/?format=json")
     if data and data.get("title"):
         check_metadata(ref, data["title"], [], None, f"IETF datatracker RFC {ref.rfc}")
         if data.get("std_level"):
@@ -1092,6 +1160,11 @@ def verify_rfc(ref: Reference, f: Fetcher) -> bool:
         return True
     rec = f.get(f"https://www.rfc-editor.org/rfc/rfc{ref.rfc}.txt", accept="text/plain")
     if not rec["ok"]:
+        why = [w for w in (unreachable,
+                           rec["error"] if lookup_failed(rec) else None) if w]
+        if why:
+            ref.notes.append(f"RFC {ref.rfc} could not be checked ({'; '.join(why)})")
+            return False
         ref.status = "NOT_FOUND"
         ref.notes.append(f"RFC {ref.rfc} not retrievable from datatracker or rfc-editor")
         return True
@@ -1108,8 +1181,12 @@ def verify_rfc(ref: Reference, f: Fetcher) -> bool:
 
 
 def verify_draft(ref: Reference, f: Fetcher) -> bool:
-    data = f.json(
+    data, unreachable = f.json(
         f"https://datatracker.ietf.org/api/v1/doc/document/{ref.draft}/?format=json")
+    if unreachable:
+        ref.notes.append(f"the IETF datatracker could not be reached ({unreachable}), "
+                         f"so {ref.draft} was not checked")
+        return False
     if not data or not data.get("title"):
         ref.status = "NOT_FOUND"
         ref.notes.append(f"IETF datatracker has no draft named {ref.draft}")
@@ -1139,9 +1216,16 @@ def verify_web(ref: Reference, f: Fetcher) -> bool:
         return False
     rec = f.get(ref.url)
     if not rec["ok"]:
-        # Our own offline switch is not evidence about the link.
-        ref.status = "UNVERIFIABLE" if rec["error"] == "offline" else "LINK_DEAD"
-        ref.notes.append(f"{ref.url} -> {rec['error']}")
+        # Our own offline switch is not evidence about the link, and neither is
+        # a timeout or a rate limit. Only a server saying the page is gone, or
+        # a hostname that does not resolve, is evidence.
+        if rec["error"] == "offline" or lookup_failed(rec):
+            ref.status = "UNVERIFIABLE"
+            ref.notes.append(f"{ref.url} could not be reached ({rec['error']}); "
+                             "unconfirmed rather than dead")
+        else:
+            ref.status = "LINK_DEAD"
+            ref.notes.append(f"{ref.url} -> {rec['error']}")
         return True
 
     page_title = ""
@@ -1192,16 +1276,17 @@ def verify(ref: Reference, f: Fetcher) -> None:
         ref.notes.append("offline mode: no source was contacted")
         return
     done = False
+    asked = False               # was any authority actually consulted?
     if ref.arxiv:
-        done = verify_arxiv(ref, f)
+        asked, done = True, verify_arxiv(ref, f)
     if not done and ref.doi:
-        done = verify_doi(ref, f)
+        asked, done = True, verify_doi(ref, f)
     if not done and ref.rfc:
-        done = verify_rfc(ref, f)
+        asked, done = True, verify_rfc(ref, f)
     if not done and ref.draft:
-        done = verify_draft(ref, f)
+        asked, done = True, verify_draft(ref, f)
     if not done and ref.kind == "paper":
-        done = verify_by_title(ref, f)
+        asked, done = True, verify_by_title(ref, f)
     if not done and ref.url:
         done = verify_web(ref, f)
     elif done and ref.url and ref.status in {"VERIFIED", "PARTIAL"} and ref.kind != "web":
@@ -1209,10 +1294,15 @@ def verify(ref: Reference, f: Fetcher) -> None:
         probe = f.get(ref.url)
         if not probe["ok"]:
             ref.notes.append(f"companion link {ref.url} -> {probe['error']}")
-            ref.status = "LINK_DEAD" if ref.status == "VERIFIED" else ref.status
+            if ref.status == "VERIFIED" and not lookup_failed(probe):
+                ref.status = "LINK_DEAD"
     if not done and not ref.url:
         ref.status = "UNVERIFIABLE"
-        ref.notes.append("no DOI, arXiv id, RFC number or URL to check against")
+        if not asked:
+            ref.notes.append("no DOI, arXiv id, RFC number or URL to check against")
+        # If an authority was asked and still produced no verdict, its own note
+        # already says which one went unanswered; repeating "nothing checkable"
+        # over the top of that would be false.
 
 
 # --------------------------------------------------------------------------
