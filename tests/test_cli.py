@@ -21,11 +21,6 @@ def run(*args, **kw):
                           capture_output=True, text=True, **kw)
 
 
-# A C locale gives Python an ASCII stdout. That is the cheap stand-in for a
-# legacy Windows code page, and it is reachable on every runner we have, so the
-# encoding guarantees get tested without a Windows-only fixture. PYTHONUTF8 and
-# PYTHONCOERCECLOCALE are both off because either one would quietly hand the
-# process UTF-8 back and make the test prove nothing.
 ASCII_LOCALE = {**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0",
                 "PYTHONCOERCECLOCALE": "0"}
 
@@ -327,9 +322,7 @@ class TestMailtoIsOptIn(unittest.TestCase):
 
 
 class TestALegacyCodePageDoesNotCrashARun(unittest.TestCase):
-    """Issue #30. The report is not pure ASCII -- the summary rule alone is an
-    em-dash -- so a run whose stdout encoding was left to the locale dies on its
-    own output, whatever the document contained."""
+    """Issue #30: a legacy code page must not crash a run."""
 
     def test_a_report_survives_an_ascii_stdout(self):
         proc = run("check", SAMPLE, "--offline", env=ASCII_LOCALE)
@@ -342,14 +335,8 @@ class TestALegacyCodePageDoesNotCrashARun(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("pandoc"), "pandoc is not installed")
 class TestAConvertedDocumentKeepsItsAccents(unittest.TestCase):
-    """Issue #31. pandoc writes UTF-8 whatever the locale says, so the capture
-    has to name that encoding rather than inherit the locale's. The document is
-    built here rather than committed: a .docx is a zip, and a binary fixture
-    nobody can read in a diff is worse than one pandoc rebuilds on demand."""
+    """Issue #31: a document converted by pandoc keeps its accents."""
 
-    # Three entries because split_document() will not accept a heading as the
-    # real reference list on fewer, and every one of them carries a character
-    # that a legacy code page cannot represent.
     SOURCE = """\
 # A short paper
 
