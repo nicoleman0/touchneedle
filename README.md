@@ -168,7 +168,7 @@ Both subcommands take the document, and:
 
 | Option | Effect |
 |---|---|
-| `--json FILE` | Also write the results machine-readably, for a CI step or a dashboard |
+| `--json FILE` | Also write the results machine-readably, for a CI step or a dashboard. See [`docs/json-output.md`](docs/json-output.md) for the output schema. |
 | `--offline` | Parse and cross-check only, contacting nothing. Useful for smoke-testing the parse |
 | `--cache DIR` | HTTP cache, 7-day TTL, so re-runs are nearly free |
 | `--timeout N` | Per-request timeout, 25 seconds by default |
