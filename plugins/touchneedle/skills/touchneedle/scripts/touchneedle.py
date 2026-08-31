@@ -259,6 +259,7 @@ class Reference:
     accessed: str = ""
     kind: str = "unknown"
     status: str = "UNVERIFIABLE"
+    unchecked: bool = False    # an authority went unreachable, so nothing was decided
     notes: list[str] = dataclasses.field(default_factory=list)
     evidence: list[str] = dataclasses.field(default_factory=list)
     cited_by: list[str] = dataclasses.field(default_factory=list)
@@ -1058,6 +1059,7 @@ def verify_arxiv(ref: Reference, f: Fetcher) -> bool:
     url = f"http://export.arxiv.org/api/query?id_list={ref.arxiv}&max_results=1"
     rec = f.get(url, accept="application/atom+xml")
     if not rec["ok"]:
+        ref.unchecked = True
         ref.notes.append(f"arXiv API unreachable ({rec['error']})")
         return False
     try:
@@ -1091,6 +1093,7 @@ def verify_doi(ref: Reference, f: Fetcher) -> bool:
         f"https://api.crossref.org/works/{urllib.parse.quote(ref.doi)}")
     if unreachable:
         # No verdict: hand the entry to the next route rather than accuse it.
+        ref.unchecked = True
         ref.notes.append(f"Crossref could not be reached ({unreachable}), "
                          f"so DOI {ref.doi} was not checked")
         return False
@@ -1179,6 +1182,7 @@ def verify_by_title(ref: Reference, f: Fetcher) -> bool:
     if silent:
         # Say which search did not run, whatever the outcome: a reader deciding
         # how much to trust this line needs to know what was actually asked.
+        ref.unchecked = True
         ref.notes.append("could not search " + " and ".join(silent))
     # A search returns candidates; a DOI lookup returns the work. Nothing
     # guarantees the best hit here is the paper being cited, so a weak candidate
@@ -1219,6 +1223,7 @@ def verify_rfc(ref: Reference, f: Fetcher) -> bool:
         why = [w for w in (unreachable,
                            rec["error"] if lookup_failed(rec) else None) if w]
         if why:
+            ref.unchecked = True
             ref.notes.append(f"RFC {ref.rfc} could not be checked ({'; '.join(why)})")
             return False
         ref.status = "NOT_FOUND"
@@ -1240,6 +1245,7 @@ def verify_draft(ref: Reference, f: Fetcher) -> bool:
     data, unreachable = f.json(
         f"https://datatracker.ietf.org/api/v1/doc/document/{ref.draft}/?format=json")
     if unreachable:
+        ref.unchecked = True
         ref.notes.append(f"the IETF datatracker could not be reached ({unreachable}), "
                          f"so {ref.draft} was not checked")
         return False
@@ -1277,6 +1283,7 @@ def verify_web(ref: Reference, f: Fetcher) -> bool:
         # a hostname that does not resolve, is evidence.
         if rec["error"] == "offline" or lookup_failed(rec):
             ref.status = "UNVERIFIABLE"
+            ref.unchecked = rec["error"] != "offline"
             ref.notes.append(f"{ref.url} could not be reached ({rec['error']}); "
                              "unconfirmed rather than dead")
         else:
@@ -1397,7 +1404,8 @@ def ref_label(r: Reference) -> str:
 
 
 def build_report(refs: list[Reference], cites: list[Citation], doc: str,
-                 offline: bool, style: str = "", forced: bool = False) -> str:
+                 offline: bool, style: str = "", forced: bool = False,
+                 polite: bool = False) -> str:
     counts: dict[str, int] = {}
     for r in refs:
         counts[r.status] = counts.get(r.status, 0) + 1
@@ -1422,7 +1430,7 @@ def build_report(refs: list[Reference], cites: list[Citation], doc: str,
         "LINK_DEAD": "**URL does not resolve**",
         "LINK_MOVED": "URL redirects elsewhere",
         "STALE": "**cited revision superseded**",
-        "UNVERIFIABLE": "nothing checkable in the entry",
+        "UNVERIFIABLE": "nothing checkable in the entry, or the check could not be run",
     }
     for status in sorted(counts, key=lambda s: SEVERITY[s]):
         L.append(f"| {status} | {counts[status]} | {meaning[status]} |")
@@ -1430,6 +1438,18 @@ def build_report(refs: list[Reference], cites: list[Citation], doc: str,
     problems = [r for r in refs if r.status in PROBLEM_STATUSES]
     L += ["", f"**{len(problems)} entries need attention.**" if problems
           else "**No entry failed verification.**", ""]
+
+    # An entry nobody could look up is not a clean entry, and burying that in a
+    # per-entry note lets a run of them read as a quiet pass.
+    unchecked = [r for r in refs if r.unchecked]
+    if unchecked:
+        L += [f"**{len(unchecked)} entries could not be checked at all**, because an "
+              "authority was unreachable. They are recorded as unverified rather than "
+              "as findings, so a clean run above does not mean these are sound."
+              + ("" if polite else
+                 " Crossref and OpenAlex both keep a separate queue for callers who "
+                 "identify themselves, and OpenAlex rate-limits anonymous search when "
+                 "it is busy: `--mailto you@example.com` avoids most of this."), ""]
 
     L += ["## Entries needing attention", ""]
     if not problems:
@@ -1634,7 +1654,7 @@ def main() -> int:
             verify(r, f)
             print(f"    {r.status}", file=sys.stderr, flush=True)
         out = build_report(refs, cites, args.doc, args.offline, style,
-                           args.style != "auto")
+                           args.style != "auto", polite=bool(args.mailto))
         if args.json_out:
             with open(args.json_out, "w", encoding="utf-8") as fh:
                 json.dump({"style": style,

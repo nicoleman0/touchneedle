@@ -174,7 +174,13 @@ Both subcommands take the document, and:
 | `--timeout N` | Per-request timeout, 25 seconds by default |
 | `--mailto ADDRESS` | Contact address for Crossref and OpenAlex's polite rate-limit pool |
 
-`--mailto` is off by default and never inferred, because it sends an address to
+`--mailto` is worth more than politeness. OpenAlex rate-limits anonymous search
+when it is busy, and OpenAlex is the fallback that covers what Crossref does not
+index — USENIX, NeurIPS, ICLR, most conference proceedings. Without a contact
+address those entries come back unchecked rather than verified, and the report
+says so at the top rather than passing them off as clean.
+
+It stays off by default and is never inferred, because it sends an address to
 third parties. It is also read from `CITATION_CHECK_MAILTO`.
 
 `check` exits 2 when something needs attention and 0 when clean. `claims` always
