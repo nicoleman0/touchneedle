@@ -9,15 +9,26 @@ permissions:
   contents: read
 
 jobs:
-  # The matrix exists to hold the README's "Python 3.11+" claim honest: floor,
-  # middle, and newest. If you turn on branch protection, pin all of these job
-  # names as required checks -- a matrix job that is not listed is not enforced.
+  # Run the test suite on Linux, macOS, and Windows.
+  # Linux keeps the existing Python 3.11/3.13/3.14 coverage.
+  # macOS and Windows use one Python version each.
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.13", "3.14"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: ubuntu-latest
+            python-version: "3.14"
+          - os: macos-latest
+            python-version: "3.14"
+          - os: windows-latest
+            python-version: "3.14"
+
     steps:
       - uses: actions/checkout@v7
 
@@ -26,18 +37,16 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       # No install step on purpose: the tool is standard library only, and a
-      # dependency creeping in should break the build here rather than quietly
-      # in someone's clone.
+      # dependency creeping in should break the build here rather than
+      # quietly in someone's clone.
       - name: Run the test suite
         run: python -m unittest discover -s tests -t tests -v
 
       - name: Check the tool runs end to end
         run: |
-          python scripts/touchneedle.py check tests/fixtures/sample.md \
-            --offline --out /tmp/report.md --json /tmp/data.json
-          python scripts/touchneedle.py claims tests/fixtures/sample.md \
-            --out /tmp/claims.md
-          grep -q '8 reference entries' /tmp/report.md
+          python scripts/touchneedle.py check tests/fixtures/sample.md --offline --out "${{ runner.temp }}/report.md" --json "${{ runner.temp }}/data.json"
+          python scripts/touchneedle.py claims tests/fixtures/sample.md --out "${{ runner.temp }}/claims.md"
+          python -c "from pathlib import Path; assert '8 reference entries' in Path(r'${{ runner.temp }}/report.md').read_text()"
 
   # Dev-only tooling, installed here and nowhere else -- the package itself
   # still has zero runtime dependencies, and the `test` job above deliberately
