@@ -52,6 +52,20 @@ quantifiers that an f-string would require doubling -- get one wrong and the
 pattern breaks silently, with the tests still passing on the fixture. Leave them
 as concatenation.
 
+## The plugin's bundled copy
+
+`scripts/touchneedle.py` and `SKILL.md` are the sources. `plugins/touchneedle/`
+carries generated copies of both, because `SKILL.md` invokes the checker by a
+path relative to itself and the script therefore has to travel with it. After
+editing either source, run:
+
+```bash
+bash scripts/sync-plugin-skill.sh
+```
+
+and commit whatever it changes. CI regenerates the copies and fails if anything
+differs, which is the usual reason an otherwise green pull request goes red.
+
 ## Adding a source of authority
 
 Verification routes on what the entry carries — see `verify()`. A new authority

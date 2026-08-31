@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `--version` prints the version and exits. `__version__` in the module is
+  already the single source of truth, so the flag reads it rather than
+  restating it.
+
 ## [0.2.2] — 2026-08-31
 
 Every entry below is the same defect: the checker reporting a coverage gap of
