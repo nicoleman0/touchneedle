@@ -21,6 +21,42 @@ that blurs the two — a status that overstates confidence, a report line that
 reads as an accusation when it is a coverage gap — is a bug, however useful it
 looks.
 
+## Sending a change
+
+Work from a branch, not from your fork's `main`. A pull request opened from
+`main` cannot be updated without moving your fork's default branch, and it
+tangles the next change you send with this one.
+
+Pull request titles follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+fix: pin UTF-8 for stdout and pandoc output on legacy code pages
+feat: add --version flag to CLI
+docs: document the sync gate
+test: cover the ambiguous-suffix splitter
+```
+
+The title carries further than it looks. Pull requests are squash-merged, so it
+becomes the subject line of the commit that lands on `main`, and the branch's
+own commit messages are folded into that commit's body. Those should be legible,
+but the title is the one that has to be right. History from before this was
+written down does not follow it — the rule starts here rather than being
+applied backwards.
+
+`fix:` and `feat:` are the two that carry weight, because they decide whether
+the next release is a patch or a minor version. `docs:`, `test:`, `refactor:`,
+`chore:` and `ci:` cover changes no changelog entry needs to mention.
+
+Every push runs three gates, and a pull request adds a fourth. All of them must
+be green:
+
+| Gate | What it runs | Described in |
+| --- | --- | --- |
+| `test` | the suite, on Linux, macOS and Windows | [Running the tests](#running-the-tests) |
+| `lint` | `ruff check .` and `mypy scripts/touchneedle.py` | [Code style](#code-style) |
+| `sync` | regenerates the plugin's bundled copies, and fails if they are stale | [The plugin's bundled copy](#the-plugins-bundled-copy) |
+| `pr-title` | the title against the pattern above | this section |
+
 ## Running the tests
 
 ```bash

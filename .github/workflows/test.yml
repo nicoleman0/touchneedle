@@ -94,3 +94,25 @@ jobs:
             git diff --stat
             exit 1
           fi
+
+  # Pull requests are squash-merged and the squash title defaults to the pull
+  # request title, so this string is the commit message that lands on main.
+  # Checked here rather than left to the merge box, so a contributor sees it
+  # while there is still time to edit it. The title goes through the
+  # environment, never straight into the script: it is attacker-controlled text
+  # and interpolating it into a shell would be an injection.
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Title follows Conventional Commits
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        shell: bash
+        run: |
+          pattern='^(feat|fix|docs|test|refactor|perf|build|chore|ci|style|revert)(\([a-z0-9 .-]+\))?!?: .+'
+          if ! grep -qE "$pattern" <<< "$TITLE"; then
+            echo "::error::pull request title must follow Conventional Commits, e.g. 'fix: pin UTF-8 for pandoc output'. See CONTRIBUTING.md."
+            echo "got: $TITLE"
+            exit 1
+          fi
