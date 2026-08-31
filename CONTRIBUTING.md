@@ -47,15 +47,21 @@ applied backwards.
 the next release is a patch or a minor version. `docs:`, `test:`, `refactor:`,
 `chore:` and `ci:` cover changes no changelog entry needs to mention.
 
-Every push runs three gates, and a pull request adds a fourth. All of them must
-be green:
+Six gates run on a pull request, and all six must be green:
 
 | Gate | What it runs | Described in |
 | --- | --- | --- |
 | `test` | the suite, on Linux, macOS and Windows | [Running the tests](#running-the-tests) |
 | `lint` | `ruff check .` and `mypy scripts/touchneedle.py` | [Code style](#code-style) |
-| `sync` | regenerates the plugin's bundled copies, and fails if they are stale | [The plugin's bundled copy](#the-plugins-bundled-copy) |
+| `sync` | regenerates the plugin's bundled copies, fails if they are stale, and runs the copy | [The plugin's bundled copy](#the-plugins-bundled-copy) |
+| `build` | builds the wheel, and checks the installed `touchneedle` command reports the same version as the source | |
+| `pandoc` | the suite again with pandoc installed, so the conversion tests stop skipping | |
 | `pr-title` | the title against the pattern above | this section |
+
+`pandoc` exists because the conversion tests guard themselves with
+`skipUnless(shutil.which("pandoc"))`, so that nobody is made to install pandoc
+to run the suite. Without a job that has it, those tests skip everywhere and
+report green, which reads as coverage and is not.
 
 ## Running the tests
 
