@@ -8,6 +8,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- An authority that could not be reached no longer produces a finding. A rate
+  limit, a timeout or a 5xx while asking Crossref, OpenAlex, the IETF
+  datatracker or the live web is a failure of our side of the conversation and
+  says nothing about the citation, but it was being reported as `NOT_FOUND`,
+  `MISMATCH` or `LINK_DEAD` — and taking the exit status to 2 with it. Only a
+  server that answers 404 or 410, or a hostname that does not resolve, is now
+  treated as evidence. A route that cannot reach its authority returns no
+  verdict, names what went unanswered, and lets the next route try; where one
+  source answered and the other did not, a disagreement is recorded as
+  unconfirmed rather than wrong. Observed against OpenAlex, which rate-limits
+  anonymous search under load: two real papers were reported as disagreeing
+  with the record because the second opinion never arrived.
+- The report no longer claims a source was searched when it was not: the
+  "no close title match" note now names only the authorities that answered.
 - An arXiv DOI (`10.48550/arXiv.2406.04093`) now routes to the arXiv API rather
   than to Crossref. arXiv registers its DOIs with DataCite, so Crossref has no
   record of them and every preprint cited in the form doi.org recommends came

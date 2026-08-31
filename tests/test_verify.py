@@ -142,6 +142,118 @@ class TestOfflineVerify(unittest.TestCase):
         self.assertTrue(any("no DOI" in n for n in r.notes))
 
 
+class TestOutagesAreNotFindings(unittest.TestCase):
+    """The worst thing this tool can do is tell someone a correct citation is
+    wrong. A lookup that never happened must never become evidence."""
+
+    def plant(self, tmp, url, body="", ok=True, status=200, error=None):
+        key = hashlib.sha256((url + "application/json").encode()).hexdigest() + ".json"
+        with open(os.path.join(tmp, key), "w", encoding="utf-8") as fh:
+            json.dump({"ok": ok, "status": status, "body": body,
+                       "final_url": url, "error": error}, fh)
+
+    def crossref_url(self, doi):
+        import urllib.parse
+        return f"https://api.crossref.org/works/{urllib.parse.quote(doi)}"
+
+    def test_a_rate_limited_crossref_does_not_condemn_the_doi(self):
+        r = ref("Smith, J. (2020) 'A paper', Journal of Things. doi:10.1145/1234")
+        with tempfile.TemporaryDirectory() as tmp:
+            self.plant(tmp, self.crossref_url(r.doi), ok=False, status=429,
+                       error="HTTP 429")
+            verdict = cc.verify_doi(r, cc.Fetcher(tmp))
+        self.assertFalse(verdict)                 # no verdict, next route gets a turn
+        self.assertNotEqual(r.status, "NOT_FOUND")
+        self.assertTrue(any("could not be reached" in n for n in r.notes), r.notes)
+
+    def test_a_404_from_crossref_still_condemns_the_doi(self):
+        # The distinction the fix rests on: the server answered.
+        r = ref("Smith, J. (2020) 'A paper', Journal of Things. doi:10.1000/nope")
+        with tempfile.TemporaryDirectory() as tmp:
+            self.plant(tmp, self.crossref_url(r.doi), ok=False, status=404,
+                       error="HTTP 404")
+            verdict = cc.verify_doi(r, cc.Fetcher(tmp))
+        self.assertTrue(verdict)
+        self.assertEqual(r.status, "NOT_FOUND")
+
+    def test_a_silent_search_engine_is_named_and_withholds_the_verdict(self):
+        import urllib.parse
+        r = ref("Liu, Y. (2024) 'Formalizing and benchmarking prompt injection "
+                "attacks and defenses', Proceedings of the USENIX Security Symposium.")
+        q = urllib.parse.quote(r.title[:250])
+        with tempfile.TemporaryDirectory() as tmp:
+            self.plant(tmp, f"https://api.crossref.org/works?query.bibliographic={q}&rows=5",
+                       body=json.dumps({"message": {"items": [
+                           {"title": ["Something else entirely"],
+                            "author": [{"given": "A", "family": "Other"}],
+                            "issued": {"date-parts": [[2024]]}, "DOI": "10.1/x"}]}}))
+            self.plant(tmp, f"https://api.openalex.org/works?per-page=5&filter=title.search:{q}",
+                       ok=False, status=429, error="HTTP 429")
+            verdict = cc.verify_by_title(r, cc.Fetcher(tmp))
+        self.assertFalse(verdict)
+        self.assertNotEqual(r.status, "NOT_FOUND")
+        self.assertTrue(any("OpenAlex" in n and "429" in n for n in r.notes), r.notes)
+
+    def test_a_search_both_engines_answered_still_reports_not_found(self):
+        import urllib.parse
+        r = ref()
+        q = urllib.parse.quote(r.title[:250])
+        with tempfile.TemporaryDirectory() as tmp:
+            self.plant(tmp, f"https://api.crossref.org/works?query.bibliographic={q}&rows=5",
+                       body=json.dumps({"message": {"items": []}}))
+            self.plant(tmp, f"https://api.openalex.org/works?per-page=5&filter=title.search:{q}",
+                       body=json.dumps({"results": []}))
+            verdict = cc.verify_by_title(r, cc.Fetcher(tmp))
+        self.assertTrue(verdict)
+        self.assertEqual(r.status, "NOT_FOUND")
+        self.assertTrue(any("Crossref or OpenAlex" in n for n in r.notes), r.notes)
+
+    def test_a_weak_match_is_not_a_mismatch_when_the_second_opinion_is_missing(self):
+        # The real case: Crossref returns a near-miss (0.74 here) by different
+        # authors, which is above the not-found floor and would be reported as a
+        # MISMATCH, while OpenAlex -- the tie-breaker -- is rate-limited.
+        import urllib.parse
+        r = ref("Liu, Y. (2024) 'Formalizing and benchmarking prompt injection "
+                "attacks and defenses', Proceedings of the USENIX Security Symposium.")
+        q = urllib.parse.quote(r.title[:250])
+        with tempfile.TemporaryDirectory() as tmp:
+            self.plant(tmp, f"https://api.crossref.org/works?query.bibliographic={q}&rows=5",
+                       body=json.dumps({"message": {"items": [
+                           {"title": ["Benchmarking prompt injection attacks and "
+                                      "defenses in language models"],
+                            "author": [{"given": "Eleena", "family": "Mathew"}],
+                            "issued": {"date-parts": [[2024]]}, "DOI": "10.36227/x"}]}}))
+            self.plant(tmp, f"https://api.openalex.org/works?per-page=5&filter=title.search:{q}",
+                       ok=False, status=429, error="HTTP 429")
+            cc.verify_by_title(r, cc.Fetcher(tmp))
+        self.assertNotIn(r.status, cc.PROBLEM_STATUSES)
+        self.assertTrue(any("not every source could be consulted" in n for n in r.notes),
+                        r.notes)
+
+    def test_a_timeout_does_not_make_a_link_dead(self):
+        r = cc.parse_entry("Example Corp (2024) 'A post'. "
+                           "Available at: https://example.com/post")
+        with tempfile.TemporaryDirectory() as tmp:
+            key = hashlib.sha256(b"https://example.com/post").hexdigest() + ".json"
+            with open(os.path.join(tmp, key), "w", encoding="utf-8") as fh:
+                json.dump({"ok": False, "status": None, "body": "",
+                           "final_url": r.url, "error": "TimeoutError: timed out",
+                           "transient": True}, fh)
+            cc.verify_web(r, cc.Fetcher(tmp))
+        self.assertEqual(r.status, "UNVERIFIABLE")
+
+    def test_a_404_still_makes_a_link_dead(self):
+        r = cc.parse_entry("Example Corp (2024) 'A post'. "
+                           "Available at: https://example.com/gone")
+        with tempfile.TemporaryDirectory() as tmp:
+            key = hashlib.sha256(b"https://example.com/gone").hexdigest() + ".json"
+            with open(os.path.join(tmp, key), "w", encoding="utf-8") as fh:
+                json.dump({"ok": False, "status": 404, "body": "",
+                           "final_url": r.url, "error": "HTTP 404"}, fh)
+            cc.verify_web(r, cc.Fetcher(tmp))
+        self.assertEqual(r.status, "LINK_DEAD")
+
+
 class TestFetcherCache(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
