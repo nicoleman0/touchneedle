@@ -32,8 +32,8 @@ There is nothing to install first.
 ## Code style
 
 ```bash
-pip install --group dev     # ruff and mypy, dev-only
-ruff check .
+uv pip install --group dev  # ruff and mypy, dev-only; `pip install --group dev`
+ruff check .                # works too, in a virtualenv that has pip in it
 mypy scripts/touchneedle.py
 ```
 
