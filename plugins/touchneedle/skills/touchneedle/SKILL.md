@@ -57,8 +57,8 @@ Statuses, worst first:
 
 | Status | What it means | What to do |
 |---|---|---|
-| `MISMATCH` | Found a record that **disagrees** with the entry | Highest priority. Real title with the wrong authors is the classic fabricated-citation signature |
-| `NOT_FOUND` | Searched the right places, found nothing | Likely fabricated, or the title is badly wrong |
+| `MISMATCH` | Fetched the work by its identifier, and the record **disagrees** with the entry | Highest priority. Real title with the wrong authors is the classic fabricated-citation signature |
+| `NOT_FOUND` | Searched the right places and nothing there was confidently the cited work | Likely fabricated, or the title is badly wrong -- or the venue is one neither index covers, which reads the same way. The note names the closest candidate |
 | `LINK_DEAD` | URL does not resolve, or resolves to an error page | Replace the URL or add an archive link |
 | `STALE` | Cited draft revision superseded | Confirm the cited text survived into the current revision |
 | `PARTIAL` | Found, loose match | Eyeball it. PDFs and JS-rendered pages land here routinely |

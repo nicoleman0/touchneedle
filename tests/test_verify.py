@@ -208,27 +208,24 @@ class TestOutagesAreNotFindings(unittest.TestCase):
         self.assertEqual(r.status, "NOT_FOUND")
         self.assertTrue(any("Crossref or OpenAlex" in n for n in r.notes), r.notes)
 
-    def test_a_weak_match_is_not_a_mismatch_when_the_second_opinion_is_missing(self):
-        # The real case: Crossref returns a near-miss (0.74 here) by different
-        # authors, which is above the not-found floor and would be reported as a
-        # MISMATCH, while OpenAlex -- the tie-breaker -- is rate-limited.
+    def test_a_search_route_verdict_is_never_a_condemnation(self):
+        # The invariant that replaced the old downgrade: whatever a searched
+        # record disagrees about, the entry cannot leave this route condemned.
         import urllib.parse
-        r = ref("Liu, Y. (2024) 'Formalizing and benchmarking prompt injection "
-                "attacks and defenses', Proceedings of the USENIX Security Symposium.")
+        r = ref()
         q = urllib.parse.quote(r.title[:250])
         with tempfile.TemporaryDirectory() as tmp:
             self.plant(tmp, f"https://api.crossref.org/works?query.bibliographic={q}&rows=5",
-                       body=json.dumps({"message": {"items": [
-                           {"title": ["Benchmarking prompt injection attacks and "
-                                      "defenses in language models"],
-                            "author": [{"given": "Eleena", "family": "Mathew"}],
-                            "issued": {"date-parts": [[2024]]}, "DOI": "10.36227/x"}]}}))
-            self.plant(tmp, f"https://api.openalex.org/works?per-page=5&filter=title.search:{q}",
                        ok=False, status=429, error="HTTP 429")
+            self.plant(tmp, f"https://api.openalex.org/works?per-page=5&filter=title.search:{q}",
+                       body=json.dumps({"results": [
+                           {"display_name": r.title,
+                            "authorships": [{"author": {"display_name": "Jane Smith"}}],
+                            "publication_year": 2015}]}))
             cc.verify_by_title(r, cc.Fetcher(tmp))
         self.assertNotIn(r.status, cc.PROBLEM_STATUSES)
-        self.assertTrue(any("not every source could be consulted" in n for n in r.notes),
-                        r.notes)
+        self.assertTrue(any("reprint or a duplicate record" in n for n in r.notes), r.notes)
+        self.assertTrue(any("could not search Crossref" in n for n in r.notes), r.notes)
 
     def test_a_timeout_does_not_make_a_link_dead(self):
         r = cc.parse_entry("Example Corp (2024) 'A post'. "
@@ -252,6 +249,78 @@ class TestOutagesAreNotFindings(unittest.TestCase):
                            "final_url": r.url, "error": "HTTP 404"}, fh)
             cc.verify_web(r, cc.Fetcher(tmp))
         self.assertEqual(r.status, "LINK_DEAD")
+
+
+class TestSearchCandidates(unittest.TestCase):
+    """A title search returns candidates, not the cited work. Only a candidate
+    confident enough to *be* the work earns a metadata comparison."""
+
+    plant = TestOutagesAreNotFindings.plant
+
+    def search(self, tmp, r, title, authors, year=2024):
+        import urllib.parse
+        q = urllib.parse.quote(r.title[:250])
+        self.plant(tmp, f"https://api.crossref.org/works?query.bibliographic={q}&rows=5",
+                   body=json.dumps({"message": {"items": [
+                       {"title": [title],
+                        "author": [{"given": g, "family": f} for g, f in authors],
+                        "issued": {"date-parts": [[year]]}, "DOI": "10.1/x"}]}}))
+        self.plant(tmp, f"https://api.openalex.org/works?per-page=5&filter=title.search:{q}",
+                   body=json.dumps({"results": []}))
+        return cc.verify_by_title(r, cc.Fetcher(tmp))
+
+    def test_a_near_neighbour_by_other_authors_is_not_a_mismatch(self):
+        # The real case: a USENIX paper neither index covers, and Crossref
+        # offers a different paper on the same subject. The search missed; the
+        # citation is not thereby wrong.
+        r = ref("Liu, Y. (2024) 'Formalizing and benchmarking prompt injection "
+                "attacks and defenses', Proceedings of the USENIX Security Symposium.")
+        with tempfile.TemporaryDirectory() as tmp:
+            self.search(tmp, r, "Benchmarking prompt injection attacks and defenses "
+                                "in language models", [("Eleena", "Mathew")])
+        self.assertEqual(r.status, "NOT_FOUND")
+        self.assertTrue(any("no confident match" in n for n in r.notes), r.notes)
+        self.assertTrue(any("check this one by eye" in n for n in r.notes), r.notes)
+
+    def test_a_matching_title_over_the_wrong_authors_is_not_found_not_mismatch(self):
+        # On a search this is ambiguous: either the citation is fabricated, or
+        # the search landed on a neighbour sharing the title -- which is what
+        # happened to "Attention is all you need", a phrase that sits inside
+        # book chapters that are not it. The report names the neighbour and
+        # leaves the judgement to a person, rather than asserting a conflict.
+        r = ref()
+        with tempfile.TemporaryDirectory() as tmp:
+            self.search(tmp, r, r.title, [("Eleena", "Mathew")], year=2020)
+        self.assertEqual(r.status, "NOT_FOUND")
+        self.assertTrue(any("closest" in n for n in r.notes), r.notes)
+
+    def test_the_fabrication_signature_still_fires_on_an_identifier_lookup(self):
+        # Where the record is the work by construction -- a DOI, an arXiv id --
+        # a real title over the wrong authors remains exactly the signature this
+        # tool exists to catch.
+        r = ref()
+        cc.check_metadata(r, r.title, ["Eleena Mathew"], "2020", "Crossref 10.1/x")
+        self.assertEqual(r.status, "MISMATCH")
+        self.assertTrue(any("not among" in n for n in r.notes), r.notes)
+
+    def test_a_middling_title_with_the_cited_author_is_accepted(self):
+        # Same author, title differing by a subtitle: the same work, described
+        # loosely. Worth a glance, not an accusation.
+        r = ref()
+        with tempfile.TemporaryDirectory() as tmp:
+            self.search(tmp, r, "Prompt injection in language models: a survey "
+                                "of defences", [("Jane", "Smith")], year=2020)
+        self.assertEqual(r.status, "PARTIAL")
+
+    def test_an_organisation_entry_needs_the_stronger_title_match(self):
+        # No author surname to corroborate with, so the title has to carry it.
+        r = cc.parse_entry("Internet Engineering Task Force (2024) 'A study of "
+                           "prompt injection in language models', Proceedings of IETF.")
+        self.assertTrue(r.is_org)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.search(tmp, r, "Prompt injection in language models: a survey "
+                                "of defences", [("Jane", "Smith")])
+        self.assertEqual(r.status, "NOT_FOUND")
 
 
 class TestFetcherCache(unittest.TestCase):
