@@ -8,6 +8,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A record found by title search is no longer treated as the cited work. A
+  search returns neighbours, and `title_score` gives a containing title full
+  marks, so "Is Attention All You Need?" scored 1.00 against the paper it is
+  asking about and "Attention is all you need" was reported as disagreeing with
+  a 2025 book chapter. A candidate now has to carry the cited surname as well
+  before it earns a metadata comparison, candidates are ranked by that
+  corroboration ahead of title score so a wrong exact-scoring hit cannot win on
+  arrival order, and the second index is consulted whenever the first has not
+  produced the work. `MISMATCH` is left to the routes that fetch a work by its
+  identifier, where the record is the cited work by construction; a search that
+  finds nothing convincing reports not found and names the closest candidate.
+  A date that disagrees on a searched record is advisory, since an index holds
+  reprints, later editions and duplicate entries.
 - An authority that could not be reached no longer produces a finding. A rate
   limit, a timeout or a 5xx while asking Crossref, OpenAlex, the IETF
   datatracker or the live web is a failure of our side of the conversation and

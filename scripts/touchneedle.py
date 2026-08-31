@@ -1015,8 +1015,15 @@ def author_present(surname: str, authors: Iterable[str]) -> bool:
 # --------------------------------------------------------------------------
 
 def check_metadata(ref: Reference, found_title: str, found_authors: list[str],
-                   found_year: str | None, source: str) -> None:
-    """Compare a retrieved record against the reference and set status/notes."""
+                   found_year: str | None, source: str,
+                   authoritative: bool = True) -> None:
+    """Compare a retrieved record against the reference and set status/notes.
+
+    `authoritative` says whether the record is the cited work by construction,
+    as it is when fetched by DOI or arXiv id. A record merely found by title
+    search is not: an index holds reprints, duplicate entries and later
+    editions, so a disagreeing date there is worth a look rather than a verdict.
+    """
     score = title_score(ref.title, found_title)
     ref.evidence.append(f"{source}: \u201c{found_title[:140]}\u201d"
                         + (f" ({found_year})" if found_year else ""))
@@ -1028,13 +1035,20 @@ def check_metadata(ref: Reference, found_title: str, found_authors: list[str],
     if found_authors and not ref.is_org and not author_present(ref.name, found_authors):
         problems.append(f"first author '{ref.name}' not among {source} authors "
                         f"({', '.join(found_authors[:4])})")
+    dated_oddly = False
     if found_year and ref.year and abs(int(found_year) - int(ref.year)) > 1:
-        problems.append(f"year {ref.year} vs {found_year} in {source}")
+        if authoritative:
+            problems.append(f"year {ref.year} vs {found_year} in {source}")
+        else:
+            ref.notes.append(f"year {ref.year} vs {found_year} in {source}; a search "
+                             "index may hold a reprint or a duplicate record, so "
+                             "confirm the date rather than trusting either")
+            dated_oddly = True
 
     if problems:
         ref.status = "MISMATCH"
         ref.notes.extend(problems)
-    elif score >= 0.85:
+    elif score >= 0.85 and not dated_oddly:
         ref.status = "VERIFIED"
     else:
         ref.status = "PARTIAL"
@@ -1089,14 +1103,46 @@ def verify_doi(ref: Reference, f: Fetcher) -> bool:
     return True
 
 
+def confident_match(ref: Reference, score: float, authors: list[str]) -> bool:
+    """Is this candidate the cited work, or merely near it?
+
+    A title search returns neighbours, and a shared phrase scores high: the
+    title of "Attention is all you need" sits inside book chapters that are not
+    it. So a person's entry has to agree on the surname as well before the
+    candidate is treated as the work. An organisation's entry, with no surname
+    to check, and a record that lists no authors at all, have to lean on the
+    title alone and are held to a higher bar.
+    """
+    if ref.is_org or not authors:
+        return score >= 0.85
+    return score >= 0.60 and author_present(ref.name, authors)
+
+
 def verify_by_title(ref: Reference, f: Fetcher) -> bool:
     """No identifier: search Crossref then OpenAlex by bibliographic title."""
     if not ref.title:
         return False
     q = urllib.parse.quote(ref.title[:250])
-    best: tuple[float, str, list[str], str | None, str] = (0.0, "", [], None, "")
+    Candidate = tuple[float, str, list[str], str | None, str]
+    found: list[Candidate] = []
     answered: list[str] = []            # authorities that actually searched
     silent: list[str] = []              # and those that could not be reached
+
+    def rank(c: Candidate) -> tuple[bool, float]:
+        """Corroborated candidates first, then by title.
+
+        Title score alone breaks down exactly where it matters: a title that
+        contains the cited one scores 1.00, so "Is Attention All You Need?"
+        ties with the paper it is asking about, and whichever index answered
+        first would win. A candidate carrying the cited surname is the better
+        answer at the same score.
+        """
+        corroborated = (not ref.is_org and c[0] >= 0.60
+                        and author_present(ref.name, c[2]))
+        return (corroborated, c[0])
+
+    def best_of() -> Candidate:
+        return max(found, key=rank, default=(0.0, "", [], None, ""))
 
     data, unreachable = f.json(
         f"https://api.crossref.org/works?query.bibliographic={q}&rows=5"
@@ -1107,11 +1153,13 @@ def verify_by_title(ref: Reference, f: Fetcher) -> bool:
         answered.append("Crossref")
         for item in ((data or {}).get("message", {}) or {}).get("items", []):
             title, authors, year = crossref_record(item)
-            s = title_score(ref.title, title)
-            if s > best[0]:
-                best = (s, title, authors, year, f"Crossref ({item.get('DOI', 'no DOI')})")
+            found.append((title_score(ref.title, title), title, authors, year,
+                          f"Crossref ({item.get('DOI', 'no DOI')})"))
 
-    if best[0] < 0.85:
+    best = best_of()
+    if not confident_match(ref, best[0], best[2]):
+        # Ask the second index whenever the first has not produced the work --
+        # a high title score alone is not that, so it must not skip this.
         data, unreachable = f.json(
             f"https://api.openalex.org/works?per-page=5&filter=title.search:{q}"
             + (f"&mailto={urllib.parse.quote(f.mailto)}" if f.mailto else ""))
@@ -1124,29 +1172,37 @@ def verify_by_title(ref: Reference, f: Fetcher) -> bool:
                 authors = [a.get("author", {}).get("display_name", "")
                            for a in item.get("authorships", [])]
                 year = str(item.get("publication_year")) if item.get("publication_year") else None
-                s = title_score(ref.title, title)
-                if s > best[0]:
-                    best = (s, title, authors, year, "OpenAlex")
+                found.append((title_score(ref.title, title), title, authors, year,
+                              "OpenAlex"))
+        best = best_of()
 
     if silent:
         # Say which search did not run, whatever the outcome: a reader deciding
         # how much to trust this line needs to know what was actually asked.
         ref.notes.append("could not search " + " and ".join(silent))
-    if best[0] < 0.55:
+    # A search returns candidates; a DOI lookup returns the work. Nothing
+    # guarantees the best hit here is the paper being cited, so a weak candidate
+    # is evidence that the search missed -- never evidence that the entry is
+    # wrong. Only a candidate confident enough to *be* the work earns a metadata
+    # comparison, which means MISMATCH on this route needs the authors to agree
+    # first; a real title over the wrong authors reads the same as a search that
+    # landed next door, and is reported as not found, with the neighbour named.
+    if not confident_match(ref, best[0], best[2]):
         if silent:
             return False        # a search that never ran is not evidence
         ref.status = "NOT_FOUND"
         ref.notes.append(
-            f"no close title match in {' or '.join(answered)}"
-            + (f" (best {best[0]:.2f}: \u201c{best[1][:90]}\u201d)" if best[1] else ""))
+            f"no confident match in {' or '.join(answered)}"
+            + (f" (closest {best[0]:.2f}: \u201c{best[1][:90]}\u201d)" if best[1] else "")
+            + "; a venue neither index covers reads the same way here as a work "
+              "that was never published, so check this one by eye")
         return True
-    check_metadata(ref, best[1], best[2], best[3], best[4])
-    if silent and ref.status in PROBLEM_STATUSES:
-        # A weak match from the one source that answered is not enough to
-        # condemn an entry when the second opinion never arrived.
-        ref.status = "PARTIAL"
-        ref.notes.append("recorded as unconfirmed rather than wrong, because "
-                         "not every source could be consulted")
+    # Nothing beyond this point can condemn the entry: a candidate only gets
+    # here by carrying the cited surname at a title score the neighbours do not
+    # reach, and a disagreeing date on a searched record is advisory. The search
+    # route therefore reports VERIFIED, PARTIAL or NOT_FOUND, and MISMATCH is
+    # left to the routes that fetch the work by its identifier.
+    check_metadata(ref, best[1], best[2], best[3], best[4], authoritative=False)
     return True
 
 

@@ -57,7 +57,10 @@ authority can actually confirm it. The style is auto-detected, or forced with
 
 Entries with both an identifier and a URL get both, so a real paper behind a dead
 link is still reported. An entry the retrieved record contradicts comes back as
-`MISMATCH`.
+`MISMATCH` — but only where the record is the cited work by construction, which
+means an identifier. A title search returns neighbours, so a poor match there is
+reported as not found, with the closest candidate named, rather than as a
+disagreement the search is in no position to assert.
 
 **Internal consistency** — every in-text citation resolves to a list entry, every
 list entry is cited somewhere, and `2025a`/`2025b` suffixes are used
