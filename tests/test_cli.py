@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,9 +16,13 @@ from context import FIXTURES, SCRIPT, cc
 SAMPLE = os.path.join(FIXTURES, "sample.md")
 
 
-def run(*args):
+def run(*args, **kw):
     return subprocess.run([sys.executable, SCRIPT, *args],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, **kw)
+
+
+ASCII_LOCALE = {**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0",
+                "PYTHONCOERCECLOCALE": "0"}
 
 
 class TestVersionFlag(unittest.TestCase):
@@ -314,6 +319,52 @@ class TestMailtoIsOptIn(unittest.TestCase):
     def test_help_documents_that_mailto_is_sent_to_third_parties(self):
         proc = run("check", "--help")
         self.assertIn("Crossref/OpenAlex", proc.stdout)
+
+
+class TestALegacyCodePageDoesNotCrashARun(unittest.TestCase):
+    """Issue #30: a legacy code page must not crash a run."""
+
+    def test_a_report_survives_an_ascii_stdout(self):
+        proc = run("check", SAMPLE, "--offline", env=ASCII_LOCALE)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_the_claims_worklist_survives_an_ascii_stdout(self):
+        proc = run("claims", SAMPLE, env=ASCII_LOCALE)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+
+@unittest.skipUnless(shutil.which("pandoc"), "pandoc is not installed")
+class TestAConvertedDocumentKeepsItsAccents(unittest.TestCase):
+    """Issue #31: a document converted by pandoc keeps its accents."""
+
+    SOURCE = """\
+# A short paper
+
+Müller (2019) argues the point, and Lévy (2020) agrees.
+A third view is offered by Sørensen (2021).
+
+## References
+
+Müller, J. (2019) 'Über die Ordnung der Dinge', Journal of Things, 12(3), pp. 1-20.
+
+Lévy, C. (2020) 'Une étude des systèmes', Revue des Systèmes, 8(1), pp. 30-45.
+
+Sørensen, K. (2021) 'Målinger og resultater', Nordic Journal of Measurement, 4(2), pp. 5-19.
+"""
+
+    def test_a_docx_is_read_as_utf8_under_an_ascii_locale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            md = os.path.join(tmp, "doc.md")
+            docx = os.path.join(tmp, "doc.docx")
+            with open(md, "w", encoding="utf-8") as fh:
+                fh.write(self.SOURCE)
+            subprocess.run(["pandoc", md, "-o", docx], check=True, capture_output=True)
+            proc = run("check", docx, "--offline", env=ASCII_LOCALE)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("Müller", proc.stdout)
+
+
+
 
 
 if __name__ == "__main__":
