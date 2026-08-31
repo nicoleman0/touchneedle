@@ -37,7 +37,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from typing import Any
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 # Goes out in the User-Agent below, so it has to point somewhere a rate-limited
 # API operator can actually reach a human. The same URL is in pyproject.toml,
 # the README and the plugin manifests; if the repository moves, they all move.
