@@ -18,6 +18,7 @@ Exit status is 2 when the run found problems worth a human look, 0 when clean.
 """
 
 import argparse
+import io
 import dataclasses
 import difflib
 import hashlib
@@ -1618,8 +1619,9 @@ def collect(doc: str, style: str = "auto") -> tuple[list[Reference], list[Citati
 
 
 def main() -> int:
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--version", action="version", version=__version__)

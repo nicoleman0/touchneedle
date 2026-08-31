@@ -18,6 +18,7 @@ Exit status is 2 when the run found problems worth a human look, 0 when clean.
 """
 
 import argparse
+import io
 import dataclasses
 import difflib
 import hashlib
@@ -70,7 +71,7 @@ def load_text(path: str) -> str:
             sys.exit(f"error: {path} needs pandoc to convert, and pandoc is not on PATH")
         out = subprocess.run(
             ["pandoc", path, "-t", "markdown", "--wrap=none"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8"
         )
         if out.returncode != 0:
             sys.exit(f"error: pandoc failed on {path}:\n{out.stderr}")
@@ -1618,6 +1619,9 @@ def collect(doc: str, style: str = "auto") -> tuple[list[Reference], list[Citati
 
 
 def main() -> int:
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--version", action="version", version=__version__)
