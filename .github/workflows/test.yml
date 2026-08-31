@@ -9,9 +9,11 @@ permissions:
   contents: read
 
 jobs:
-  # Run the test suite on Linux, macOS, and Windows.
-  # Linux keeps the existing Python 3.11/3.13/3.14 coverage.
-  # macOS and Windows use one Python version each.
+  # The matrix exists to hold the README's "Python 3.11+" claim honest: floor,
+  # middle, and newest on Linux, plus one version each on macOS and Windows.
+  # If you turn on branch protection, pin all of these job names as required
+  # checks -- a matrix job that is not listed is not enforced, and the names
+  # here carry the OS: `test (ubuntu-latest, 3.11)`, not `test (3.11)`.
   test:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -37,16 +39,22 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       # No install step on purpose: the tool is standard library only, and a
-      # dependency creeping in should break the build here rather than
-      # quietly in someone's clone.
+      # dependency creeping in should break the build here rather than quietly
+      # in someone's clone.
       - name: Run the test suite
         run: python -m unittest discover -s tests -t tests -v
 
       - name: Check the tool runs end to end
+        # bash on all three runners, so -e stops at the first failure. pwsh
+        # propagates only the last command's exit code, which would let a
+        # broken `claims` sail through on Windows.
+        shell: bash
         run: |
-          python scripts/touchneedle.py check tests/fixtures/sample.md --offline --out "${{ runner.temp }}/report.md" --json "${{ runner.temp }}/data.json"
-          python scripts/touchneedle.py claims tests/fixtures/sample.md --out "${{ runner.temp }}/claims.md"
-          python -c "from pathlib import Path; assert '8 reference entries' in Path(r'${{ runner.temp }}/report.md').read_text()"
+          python scripts/touchneedle.py check tests/fixtures/sample.md \
+            --offline --out "$RUNNER_TEMP/report.md" --json "$RUNNER_TEMP/data.json"
+          python scripts/touchneedle.py claims tests/fixtures/sample.md \
+            --out "$RUNNER_TEMP/claims.md"
+          python -c "import os, pathlib; assert '8 reference entries' in pathlib.Path(os.environ['RUNNER_TEMP'], 'report.md').read_text(encoding='utf-8')"
 
   # Dev-only tooling, installed here and nowhere else -- the package itself
   # still has zero runtime dependencies, and the `test` job above deliberately
