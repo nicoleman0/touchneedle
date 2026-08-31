@@ -279,6 +279,12 @@ QUOTED = re.compile(
 URL_RE = re.compile(r"<?(https?://[^\s>)\]]+)>?")
 DOI_RE = re.compile(r"\b(10\.\d{4,9}/[^\s,;>\)\]]+)")
 ARXIV_RE = re.compile(r"arXiv[:\s]\s*(\d{4}\.\d{4,5})(v\d+)?", re.I)
+# arXiv's own DOI, which is the form doi.org recommends for citing a preprint
+# and the form an AI-drafted bibliography reaches for. It is registered with
+# DataCite, so asking Crossref about it returns nothing and the entry would be
+# reported NOT_FOUND -- a coverage gap accusing a real paper. The id inside it
+# is what the arXiv API answers to.
+ARXIV_DOI_RE = re.compile(r"\b10\.48550/arXiv\.(\d{4}\.\d{4,5})(v\d+)?", re.I)
 RFC_RE = re.compile(r"\bRFC\s*(\d{3,5})\b", re.I)
 DRAFT_RE = re.compile(r"\b(draft-[a-z0-9][a-z0-9\-]*[a-z0-9])\b", re.I)
 # 'Accessed: 3 June 2026' comes parenthesised in Harvard and bare at the end
@@ -458,7 +464,7 @@ def parse_entry(raw: str) -> Reference:
         ref.url = m.group(1).rstrip(".,;")
     if m := DOI_RE.search(rest):
         ref.doi = m.group(1).rstrip(".")
-    if m := ARXIV_RE.search(rest):
+    if m := ARXIV_RE.search(rest) or ARXIV_DOI_RE.search(rest):
         ref.arxiv = m.group(1)
     if m := RFC_RE.search(rest):
         ref.rfc = m.group(1)

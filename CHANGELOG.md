@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- An arXiv DOI (`10.48550/arXiv.2406.04093`) now routes to the arXiv API rather
+  than to Crossref. arXiv registers its DOIs with DataCite, so Crossref has no
+  record of them and every preprint cited in the form doi.org recommends came
+  back `NOT_FOUND` — a coverage gap reporting itself as a finding, against real
+  and correctly described papers, and an exit status of 2 with it. Found by
+  running the checker over a machine-drafted bibliography, where the form is
+  ubiquitous: five of eight entries were accused, and all five were real.
+
 ## [0.2.1] — 2026-08-30
 
 Packaging and documentation only; the checker itself is byte-for-byte 0.2.0.
