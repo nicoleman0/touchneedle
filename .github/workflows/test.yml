@@ -10,14 +10,27 @@ permissions:
 
 jobs:
   # The matrix exists to hold the README's "Python 3.11+" claim honest: floor,
-  # middle, and newest. If you turn on branch protection, pin all of these job
-  # names as required checks -- a matrix job that is not listed is not enforced.
+  # middle, and newest on Linux, plus one version each on macOS and Windows.
+  # If you turn on branch protection, pin all of these job names as required
+  # checks -- a matrix job that is not listed is not enforced, and the names
+  # here carry the OS: `test (ubuntu-latest, 3.11)`, not `test (3.11)`.
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.13", "3.14"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: ubuntu-latest
+            python-version: "3.14"
+          - os: macos-latest
+            python-version: "3.14"
+          - os: windows-latest
+            python-version: "3.14"
+
     steps:
       - uses: actions/checkout@v7
 
@@ -32,12 +45,16 @@ jobs:
         run: python -m unittest discover -s tests -t tests -v
 
       - name: Check the tool runs end to end
+        # bash on all three runners, so -e stops at the first failure. pwsh
+        # propagates only the last command's exit code, which would let a
+        # broken `claims` sail through on Windows.
+        shell: bash
         run: |
           python scripts/touchneedle.py check tests/fixtures/sample.md \
-            --offline --out /tmp/report.md --json /tmp/data.json
+            --offline --out "$RUNNER_TEMP/report.md" --json "$RUNNER_TEMP/data.json"
           python scripts/touchneedle.py claims tests/fixtures/sample.md \
-            --out /tmp/claims.md
-          grep -q '8 reference entries' /tmp/report.md
+            --out "$RUNNER_TEMP/claims.md"
+          python -c "import os, pathlib; assert '8 reference entries' in pathlib.Path(os.environ['RUNNER_TEMP'], 'report.md').read_text(encoding='utf-8')"
 
   # Dev-only tooling, installed here and nowhere else -- the package itself
   # still has zero runtime dependencies, and the `test` job above deliberately
