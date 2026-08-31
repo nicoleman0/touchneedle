@@ -1,12 +1,21 @@
 name: test
 
+# Only main on push. A pull request branch is already covered by the
+# pull_request event, and listing both ran the whole matrix twice against the
+# same commit.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
+
+# A superseded run is wasted work, so cancel it -- except on main, where each
+# push is a distinct commit whose result is worth having.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   # The matrix exists to hold the README's "Python 3.11+" claim honest: floor,
@@ -94,3 +103,61 @@ jobs:
             git diff --stat
             exit 1
           fi
+
+      # Being byte-identical to the source is not the same as running. SKILL.md
+      # invokes the checker by a path relative to itself, so the copy is only
+      # useful if that path resolves inside the plugin layout.
+      - name: The bundled copy runs
+        run: |
+          python3 plugins/touchneedle/skills/touchneedle/scripts/touchneedle.py \
+            check tests/fixtures/sample.md --offline > /dev/null
+
+  # pyproject wires four things together -- py-modules, package-dir, the dynamic
+  # version read from __version__, and the console entry point -- so that
+  # SKILL.md and pip share one file. None of it was exercised until a release
+  # was already being cut. publish.yml runs the same two build commands; that
+  # duplication is the point, because here a mistake is still cheap.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install --upgrade build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+
+      # Installing the wheel and running the console script exercises all four
+      # of those directives at once. A version that disagrees with the module
+      # means setuptools and sync-plugin-skill.sh are reading __version__
+      # differently, which is otherwise invisible until PyPI has the artefact.
+      - name: The installed console script runs
+        run: |
+          python -m venv /tmp/wheeltest
+          /tmp/wheeltest/bin/pip install --quiet dist/*.whl
+          installed="$(/tmp/wheeltest/bin/touchneedle --version)"
+          source="$(python scripts/touchneedle.py --version)"
+          echo "installed: $installed / source: $source"
+          [ "$installed" = "$source" ]
+
+  # The suite's pandoc test guards itself with skipUnless, so that a contributor
+  # without pandoc is not made to install it. No runner has pandoc either, which
+  # left the test skipping everywhere and reporting green. This is the one job
+  # where it actually runs. Ubuntu only: the test forces LC_ALL=C to get an
+  # ASCII stdout, and Windows ignores LC_ALL.
+  pandoc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - run: sudo apt-get install -y pandoc
+
+      - name: Run the test suite with pandoc present
+        run: python -m unittest discover -s tests -t tests -v
