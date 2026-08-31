@@ -285,6 +285,22 @@ class TestParseEntry(unittest.TestCase):
         self.assertEqual(ref.accessed, "3 Mar. 2021")
         self.assertNotEqual(ref.year, "2021")
 
+    def test_an_arxiv_doi_routes_to_arxiv_not_crossref(self):
+        # 10.48550 is registered with DataCite; Crossref has no record of it,
+        # so routing it as an ordinary DOI reports a real paper NOT_FOUND.
+        ref = cc.parse_entry(
+            "Gao, L. et al. (2024) 'Scaling and evaluating sparse autoencoders', "
+            "*arXiv*, 2406.04093. Available at: https://doi.org/10.48550/arXiv.2406.04093")
+        self.assertEqual(ref.arxiv, "2406.04093")
+        self.assertEqual(ref.kind, "arxiv")
+
+    def test_an_ordinary_doi_is_untouched_by_the_arxiv_route(self):
+        ref = cc.parse_entry(
+            "Jones, K. (2020) 'A paper about things', Journal of Things. "
+            "doi:10.1145/3605764.3623985")
+        self.assertEqual(ref.arxiv, "")
+        self.assertEqual(ref.kind, "doi")
+
     def test_trailing_url_punctuation_is_trimmed(self):
         ref = cc.parse_entry(
             "Example Corp (2024) 'A post'. Available at: https://example.com/post.")
