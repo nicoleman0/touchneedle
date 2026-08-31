@@ -300,7 +300,10 @@ ACCESSED_RE = re.compile(
 # initial ('Smith, J.') or spelled out ('Smith, John'), because Chicago and
 # MLA spell it out. Organisations have no comma after a single-token surname.
 PERSON_RE = re.compile(
-    r"^[A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]+,\s*[A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]*\.?")
+    r"^(?:[a-z\u00c0-\u00ff][\w\u00c0-\u017e'\u2019\-]*\s+)*"
+    r"[A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]+,"
+    r"\s*[A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]*\.?"
+)
 # IEEE inverts the author: initials first ('J. Smith', 'A.-B. Smith').
 IEEE_PERSON = re.compile(r"^[A-Z]\.(?:-[A-Z]\.)?\s+[A-Z\u00c0-\u00dd]")
 # Vancouver/AMA glues initials to the surname with no comma ('Smith JA').

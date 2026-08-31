@@ -214,6 +214,15 @@ class TestParseEntry(unittest.TestCase):
         self.assertEqual(ref.title, "A paper about things")
         self.assertEqual(ref.key, "smith|2020")
 
+    def test_particle_surname_is_kept_as_person(self):
+        ref = cc.parse_entry(
+            "van der Waals, J. D. (2020) 'A Study of Things', Journal of Things.")
+        self.assertEqual(ref.name, "van der Waals")
+        self.assertFalse(ref.is_org)
+        self.assertEqual(ref.year, "2020")
+        self.assertEqual(ref.title, "A Study of Things")
+        self.assertEqual(ref.key, "van der waals|2020")
+
     def test_organisation_author_is_kept_whole(self):
         ref = cc.parse_entry(
             "Anthropic (2024) 'Model Context Protocol specification'. "
