@@ -38,7 +38,8 @@ from typing import Any
 
 __version__ = "0.2.1"
 # Goes out in the User-Agent below, so it has to point somewhere a rate-limited
-# API operator can actually reach a human. One token, repo-wide -- see RELEASING.md.
+# API operator can actually reach a human. The same URL is in pyproject.toml,
+# the README and the plugin manifests; if the repository moves, they all move.
 REPO_URL = "https://github.com/nicoleman0/touchneedle"
 UA = f"touchneedle/{__version__} (+{REPO_URL}; academic reference verification)"
 CACHE_TTL = 7 * 24 * 3600

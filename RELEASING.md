@@ -1,33 +1,7 @@
 # Releasing
 
-## Where the project lives
-
-GitHub (`nicoleman0/touchneedle`) is canonical, because CI, PyPI trusted
-publishing and the plugin marketplace all resolve against it. The local
-self-hosted Forgejo (`forgejo.lan/ncoleman/touchneedle`) is a **pull mirror**,
-configured once in Forgejo's own UI (Settings -> Repository -> Mirror Settings,
-"Pull from a remote repository"). Nothing in this repository configures it — it
-is not even a git remote here — there is no second CI workflow to keep in step,
-and a push to GitHub turns up on Forgejo without a release step.
-
-Going Forgejo-canonical was considered and rejected: PyPI's trusted publishing
-only mints OIDC tokens for GitHub Actions, so a Forgejo-canonical layout would
-mean storing a long-lived PyPI API token in CI secrets.
-
-The repository URL appears in `scripts/touchneedle.py` (`REPO_URL`, which goes
-out in the HTTP User-Agent, so it has to point somewhere a rate-limited API
-operator can actually reach you), `pyproject.toml` (the project URLs PyPI
-renders on the sidebar), `README.md`, `CHANGELOG.md` and the plugin manifests.
-If it ever moves, rewrite all of them in one pass:
-
-```bash
-grep -rl 'nicoleman0/touchneedle' . --exclude-dir=.git \
-  | xargs perl -pi -e 's|nicoleman0/touchneedle|<new-owner>/touchneedle|g'
-```
-
-`perl -pi -e` rather than `sed -i`: the in-place flag takes a mandatory suffix
-argument on BSD sed and an optional attached one on GNU sed, so any single sed
-invocation is wrong on one platform or the other.
+How a version of touchneedle gets from the repository to PyPI. Read it top to
+bottom the first time; after that the checklist is the whole of it.
 
 ## Checklist
 
@@ -69,15 +43,11 @@ reaches 1.0.
 ## Publishing to PyPI
 
 Set up once, at [pypi.org/manage/account/publishing](https://pypi.org/manage/account/publishing/):
-add a **pending publisher** for project `touchneedle`, owner `nicoleman0`,
-repository `touchneedle`, workflow `publish.yml`, environment `pypi`. Pending is
-the right choice for a project that does not exist on PyPI yet — the first
-successful upload creates it, and the pending publisher becomes an ordinary one.
-That has already happened here, so this is setup history rather than a step: the
-publisher exists and needs no attention unless the workflow file, the repository
-or the owner is renamed. Do the same on
-[test.pypi.org](https://test.pypi.org/manage/account/publishing/) if you want a
-rehearsal first.
+the publisher is project `touchneedle`, owner `nicoleman0`, repository
+`touchneedle`, workflow `publish.yml`, environment `pypi`. It is already
+configured and needs no attention unless the workflow file, the repository or
+the owner is renamed. A project that does not yet exist on PyPI is registered as
+a *pending* publisher instead, and the first successful upload creates it.
 
 This is trusted publishing: PyPI accepts a short-lived OIDC token minted by the
 workflow, so there is no API token to store in repository secrets or to leak.
