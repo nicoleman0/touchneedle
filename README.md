@@ -13,7 +13,22 @@ reference to a paper that does not exist.
 Useful for students and examiners, and for anyone checking a reference list a
 model wrote.
 
-It works standalone, or as a coding agent skill.
+## Quick start
+
+```bash
+pip install touchneedle
+touchneedle check thesis.docx --out report.md
+```
+
+`report.md` opens with the entries that failed a check, worst first, then the
+cross-reference pass in both directions. Exit status is 2 when something needs
+attention and 0 when the list is clean, so the same command drops into CI
+unchanged.
+
+Nothing is needed beyond Python 3.11+. `pandoc` has to be on PATH for `.docx`
+input, and for nothing else.
+
+## Why not a .bib checker
 
 Most commercial citation checkers want a `.bib` file and check it against academic
 databases. That covers journal articles but misses standards,
@@ -41,8 +56,8 @@ authority can actually confirm it. The style is auto-detected, or forced with
 | A URL and nothing else | Fetched live; page title compared with the cited title |
 
 Entries with both an identifier and a URL get both, so a real paper behind a dead
-link is still reported. Detects the fabricated-citation signature — a real title
-carrying the wrong authors — as `MISMATCH`.
+link is still reported. An entry the retrieved record contradicts comes back as
+`MISMATCH`.
 
 **Internal consistency** — every in-text citation resolves to a list entry, every
 list entry is cited somewhere, and `2025a`/`2025b` suffixes are used
@@ -52,9 +67,10 @@ links to the full citation it repeats.
 
 **Claim support** — the pass that needs reading rather than fetching. `claims`
 emits a worklist pairing each in-text citation with the sentence making the claim
-and a locator for the source; the model then reads each source and rules
-SUPPORTED / PARTIAL / UNSUPPORTED / INACCESSIBLE. This catches the failure the
-database checks cannot: a genuine source attached to a claim it does not make.
+and a locator for the source, to be ruled SUPPORTED / PARTIAL / UNSUPPORTED /
+INACCESSIBLE one row at a time. This catches the failure the database checks
+cannot: a genuine source attached to a claim it does not make. Who does that
+reading is the subject of [Two ways to run it](#two-ways-to-run-it).
 
 ## What it produces
 
@@ -90,49 +106,76 @@ cross-reference pass in both directions.
 
 `--json` writes the same results machine-readably, for a CI step or a dashboard.
 
-## Install
+## Two ways to run it
 
-As a command-line tool:
+touchneedle is a command-line program. `check` is entirely scripted — it fetches
+records and compares fields, so it returns the same answer every run, with no
+model involved anywhere in it.
+
+`claims` is the half the script cannot finish. It emits a worklist: each in-text
+citation, the sentence that cites it, and a locator for the source. Ruling on
+those rows means reading the sources, which is a judgement rather than a lookup.
+
+So there are two ways to work that list. Do it yourself, from a terminal. Or run
+the tool inside a coding agent, which calls the same script for the scripted
+pass and then reads each source to fill in the second. The agent path is not a
+different tool and not a wrapper — it is `scripts/touchneedle.py` either way.
+
+### From a terminal
 
 ```bash
 pip install touchneedle
+
+touchneedle check thesis.docx --out report.md --json data.json
+touchneedle claims thesis.docx --out claims.md
 ```
 
-As a Claude Code skill:
+From a clone, without installing, that is `python3 scripts/touchneedle.py …` —
+the same file.
+
+### Inside Claude Code
+
+As a skill:
 
 ```bash
 git clone https://github.com/nicoleman0/touchneedle ~/.claude/skills/touchneedle
 ```
 
-Or as a Claude Code plugin:
+Or as a plugin:
 
 ```
 /plugin marketplace add nicoleman0/touchneedle
 /plugin install touchneedle
 ```
 
-There are no dependencies beyond Python 3.11+. `pandoc` is needed only for `.docx` input.
+Either way, ask for it in plain words — *"check the citations in thesis.docx"* —
+and the model runs `check`, reads the report, then works the claims worklist
+source by source.
 
-Then, in Claude Code: *"check the citations in thesis.docx"*.
+## Options and exit codes
 
-## Use directly
+Both subcommands take the document, and:
 
-```bash
-touchneedle check thesis.docx --out report.md --json data.json
-touchneedle claims thesis.docx --out claims.md
-```
+| Option | Effect |
+|---|---|
+| `--out FILE` | Write the report here instead of stdout |
+| `--style STYLE` | `auto` (default), `author-date`, `numeric`, `mla` or `notes`. Force one when detection guesses wrong |
 
-From a clone, without installing, that is `python3 scripts/touchneedle.py …` —
-the same file either way.
+`check` takes five more, all of them about reaching the network:
 
-Options: `--offline` (parse and cross-check only, no network), `--style
-{auto,author-date,numeric,mla,notes}` (default `auto`, detected from the list
-and the in-text markers), `--cache DIR` (HTTP cache, 7-day TTL, so re-runs are
-nearly free), `--timeout N`, and `--mailto you@example.com` for Crossref and
-OpenAlex's polite rate-limit pool. `--mailto` is off by default and never
-inferred — it sends an address to third parties.
+| Option | Effect |
+|---|---|
+| `--json FILE` | Also write the results machine-readably, for a CI step or a dashboard |
+| `--offline` | Parse and cross-check only, contacting nothing. Useful for smoke-testing the parse |
+| `--cache DIR` | HTTP cache, 7-day TTL, so re-runs are nearly free |
+| `--timeout N` | Per-request timeout, 25 seconds by default |
+| `--mailto ADDRESS` | Contact address for Crossref and OpenAlex's polite rate-limit pool |
 
-`check` exits 2 when something needs attention, 0 when clean, so it drops into CI.
+`--mailto` is off by default and never inferred, because it sends an address to
+third parties. It is also read from `CITATION_CHECK_MAILTO`.
+
+`check` exits 2 when something needs attention and 0 when clean. `claims` always
+exits 0 — it asks a question rather than answering one.
 
 ## Statuses
 
