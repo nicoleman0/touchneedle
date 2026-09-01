@@ -222,6 +222,26 @@ class TestParseEntry(unittest.TestCase):
         self.assertEqual(ref.year, "2020")
         self.assertEqual(ref.title, "A Study of Things")
         self.assertEqual(ref.key, "van der waals|2020")
+    def test_capitalised_particle_is_kept_as_person(self):
+        ref = cc.parse_entry(
+            "Van Dijk, T. A. (2020) 'A Study of Things', Journal of Things."
+        )
+        self.assertEqual(ref.name, "Van Dijk")
+        self.assertFalse(ref.is_org)
+
+    def test_capitalised_de_particle_is_kept_as_person(self):
+        ref = cc.parse_entry(
+            "De Silva, R. (2020) 'A Study of Things', Journal of Things."
+        )
+        self.assertEqual(ref.name, "De Silva")
+        self.assertFalse(ref.is_org)
+
+    def test_organization_with_lowercase_word_stays_organization(self):
+        ref = cc.parse_entry(
+            "the Archives, Kew (2020) 'A Study of Things', Journal of Things."
+        )
+        self.assertEqual(ref.name, "the Archives, Kew")
+        self.assertTrue(ref.is_org)
 
     def test_organisation_author_is_kept_whole(self):
         ref = cc.parse_entry(

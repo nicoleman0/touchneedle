@@ -296,13 +296,16 @@ DRAFT_RE = re.compile(r"\b(draft-[a-z0-9][a-z0-9\-]*[a-z0-9])\b", re.I)
 # 'accessed from the 2019 census' in running entry text is left alone.
 ACCESSED_RE = re.compile(
     r"[(\[]?\s*Accessed:?\s+((?:\d|[A-Z][a-z]{2})[^)\]]{0,18}?(?:19|20)\d\d)[.)\]]*")
-# A person's author segment opens 'Surname, Given' -- the given name may be an
-# initial ('Smith, J.') or spelled out ('Smith, John'), because Chicago and
-# MLA spell it out. Organisations have no comma after a single-token surname.
+# A person's author segment opens 'Surname, Given' -- the given name may be
+# an initial ('Smith, J.') or spelled out ('Smith, John'), and particles such
+# as 'van der' may be capitalised at the start of an entry (APA 9.98,
+# Chicago). Organisations have no comma after a single-token surname.
+PARTICLE = r"(?:van|von|de[rn]?|della|di|da|dos|du|la|le|el|al|bin|ibn|mac|mc|st|ter|ten|op|zu)"
 PERSON_RE = re.compile(
-    r"^(?:[a-z\u00c0-\u00ff][\w\u00c0-\u017e'\u2019\-]*\s+)*"
-    r"[A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]+,"
-    r"\s*[A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]*\.?"
+    rf"^(?:{PARTICLE}\s+){{0,3}}"
+    r"[A-ZÀ-Ý][\wÀ-ž'\-]+,"
+    r"\s*[A-ZÀ-Ý][\wÀ-ž'\-]*\.?",
+    re.I,
 )
 # IEEE inverts the author: initials first ('J. Smith', 'A.-B. Smith').
 IEEE_PERSON = re.compile(r"^[A-Z]\.(?:-[A-Z]\.)?\s+[A-Z\u00c0-\u00dd]")
