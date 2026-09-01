@@ -214,6 +214,60 @@ class TestParseEntry(unittest.TestCase):
         self.assertEqual(ref.title, "A paper about things")
         self.assertEqual(ref.key, "smith|2020")
 
+    def test_particle_surname_is_kept_as_person(self):
+        ref = cc.parse_entry(
+            "van der Waals, J. D. (2020) 'A Study of Things', Journal of Things.")
+        self.assertEqual(ref.name, "van der Waals")
+        self.assertFalse(ref.is_org)
+        self.assertEqual(ref.year, "2020")
+        self.assertEqual(ref.title, "A Study of Things")
+        self.assertEqual(ref.key, "van der waals|2020")
+
+    def test_capitalised_particle_is_kept_as_person(self):
+        ref = cc.parse_entry(
+            "Van Dijk, T. A. (2020) 'A Study of Things', Journal of Things."
+        )
+        self.assertEqual(ref.name, "Van Dijk")
+        self.assertFalse(ref.is_org)
+
+    def test_capitalised_de_particle_is_kept_as_person(self):
+        ref = cc.parse_entry(
+            "De Silva, R. (2020) 'A Study of Things', Journal of Things."
+        )
+        self.assertEqual(ref.name, "De Silva")
+        self.assertFalse(ref.is_org)
+
+    def test_organisation_with_lowercase_word_stays_organisation(self):
+        ref = cc.parse_entry(
+            "the Archives, Kew (2020) 'A Study of Things', Journal of Things."
+        )
+        self.assertEqual(ref.name, "the Archives, Kew")
+        self.assertTrue(ref.is_org)
+
+    def test_lowercase_initial_organisation_stays_organisation(self):
+        # re.I over the whole of PERSON_RE drops the uppercase anchor on the
+        # surname, and a one-token lowercase name walks through the gap.
+        ref = cc.parse_entry(
+            "arXiv, Cornell University (2020) 'A Study of Things', Journal of Things."
+        )
+        self.assertEqual(ref.name, "arXiv, Cornell University")
+        self.assertTrue(ref.is_org)
+
+    def test_typographic_apostrophe_surname_is_kept_as_person(self):
+        # A word processor produces U+2019, not the straight quote.
+        ref = cc.parse_entry(
+            "O\u2019Brien, J. (2020) 'A Study of Things', Journal of Things."
+        )
+        self.assertEqual(ref.name, "O\u2019Brien")
+        self.assertFalse(ref.is_org)
+
+    def test_del_particle_is_kept_as_person(self):
+        ref = cc.parse_entry(
+            "del Toro, G. (2020) 'A Study of Things', Journal of Things."
+        )
+        self.assertEqual(ref.name, "del Toro")
+        self.assertFalse(ref.is_org)
+
     def test_organisation_author_is_kept_whole(self):
         ref = cc.parse_entry(
             "Anthropic (2024) 'Model Context Protocol specification'. "
