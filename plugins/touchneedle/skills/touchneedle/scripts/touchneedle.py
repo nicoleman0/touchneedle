@@ -296,17 +296,21 @@ DRAFT_RE = re.compile(r"\b(draft-[a-z0-9][a-z0-9\-]*[a-z0-9])\b", re.I)
 # 'accessed from the 2019 census' in running entry text is left alone.
 ACCESSED_RE = re.compile(
     r"[(\[]?\s*Accessed:?\s+((?:\d|[A-Z][a-z]{2})[^)\]]{0,18}?(?:19|20)\d\d)[.)\]]*")
-# A person's author segment opens 'Surname, Given' -- the given name may be
-# an initial ('Smith, J.') or spelled out ('Smith, John'), and particles such
-# as 'van der' may be capitalised at the start of an entry (APA 9.98,
-# Chicago). Organisations have no comma after a single-token surname.
-PARTICLE = r"(?:van|von|de[rn]?|della|di|da|dos|du|la|le|el|al|bin|ibn|mac|mc|st|ter|ten|op|zu)"
+# A person's author segment opens 'Surname, Given' -- the given name may be an
+# initial ('Smith, J.') or spelled out ('Smith, John'), because Chicago and MLA
+# spell it out. Organisations have no comma after a single-token surname. The
+# particle list is closed on purpose: 'van der Waals' is a person and so is its
+# capitalised spelling (APA 9.8, Chicago), but an open '[a-z]\w*' prefix would
+# take 'the Archives, Kew' with it.
+PARTICLE = r"van|von|de(?:[rnm]|ll?a?)?|di|da|dos|du|la|le|el|al|bin|ibn|mac|mc|st|ter|ten|op|zu"
+# (?i:) scopes the fold to the particles, so 'Le' and 'le' are one rule while
+# the surname keeps its uppercase anchor -- re.I over the whole pattern makes a
+# person of 'arXiv, Cornell University'. Concatenated rather than an f-string
+# for the reason in CONTRIBUTING: the {0,3} would need doubling.
 PERSON_RE = re.compile(
-    rf"^(?:{PARTICLE}\s+){{0,3}}"
-    r"[A-ZÀ-Ý][\wÀ-ž'\-]+,"
-    r"\s*[A-ZÀ-Ý][\wÀ-ž'\-]*\.?",
-    re.I,
-)
+    r"^(?:(?i:" + PARTICLE + r")\s+){0,3}"
+    r"[A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]+,"
+    r"\s*[A-Z\u00c0-\u00dd][\w\u00c0-\u017e'\u2019\-]*\.?")
 # IEEE inverts the author: initials first ('J. Smith', 'A.-B. Smith').
 IEEE_PERSON = re.compile(r"^[A-Z]\.(?:-[A-Z]\.)?\s+[A-Z\u00c0-\u00dd]")
 # Vancouver/AMA glues initials to the surname with no comma ('Smith JA').
