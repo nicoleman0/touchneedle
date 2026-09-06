@@ -46,6 +46,11 @@ must be on PATH). Options:
 - `--cache DIR` — HTTP cache, default `.touchneedle-cache`, 7-day TTL. Re-runs are
   nearly free, so iterate freely.
 
+Live verification uses a modest pool across independent references. Requests to
+the same host remain at least 0.4 seconds apart, while different authorities
+can proceed in parallel; progress output and report rows stay in bibliography
+order.
+
 Exit status is 2 when something needs attention, 0 when clean.
 
 Routing is by what the entry carries, because no single database covers a mixed

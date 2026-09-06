@@ -183,6 +183,11 @@ says so at the top rather than passing them off as clean.
 It stays off by default and is never inferred, because it sends an address to
 third parties. It is also read from `CITATION_CHECK_MAILTO`.
 
+Live checks use a modest pool across independent references. Requests to one
+host remain spaced by the politeness delay, while different authorities can be
+checked in parallel; progress output and report rows remain in bibliography
+order.
+
 `check` exits 2 when something needs attention and 0 when clean. `claims` always
 exits 0 — it asks a question rather than answering one.
 

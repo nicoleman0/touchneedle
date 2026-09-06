@@ -18,6 +18,7 @@ Exit status is 2 when the run found problems worth a human look, 0 when clean.
 """
 
 import argparse
+import concurrent.futures
 import dataclasses
 import difflib
 import hashlib
@@ -29,6 +30,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import unicodedata
 import urllib.error
@@ -938,51 +940,88 @@ class Fetcher:
         self.offline = offline
         self.mailto = mailto
         self.delay = delay
-        self.last = 0.0
+        self._rate_guard = threading.Lock()
+        self._host_locks: dict[str, threading.Lock] = {}
+        self._last_by_host: dict[str, float] = {}
+        self._cache_guard = threading.Lock()
+        self._cache_locks: dict[str, threading.Lock] = {}
         os.makedirs(cache_dir, exist_ok=True)
+
+    def _cache_lock(self, path: str) -> threading.Lock:
+        with self._cache_guard:
+            return self._cache_locks.setdefault(path, threading.Lock())
+
+    @staticmethod
+    def _host_key(url: str) -> str:
+        parsed = urllib.parse.urlsplit(url)
+        return (parsed.hostname or parsed.netloc or url).lower()
+
+    def _wait_for_host(self, url: str) -> None:
+        """Wait until this host may receive another request.
+
+        The lock is held only while reserving the next request slot. Network
+        I/O happens after it is released, so different hosts can be fetched in
+        parallel while requests to one host remain spaced by ``delay``.
+        """
+        host = self._host_key(url)
+        with self._rate_guard:
+            host_lock = self._host_locks.setdefault(host, threading.Lock())
+        with host_lock:
+            now = time.monotonic()
+            last = self._last_by_host.get(host)
+            if last is not None:
+                gap = self.delay - (now - last)
+                if gap > 0:
+                    time.sleep(gap)
+            self._last_by_host[host] = time.monotonic()
 
     def get(self, url: str, accept: str | None = None,
             max_bytes: int = 400_000) -> dict[str, Any]:
         path = os.path.join(self.cache_dir, hashlib.sha256(
             (url + (accept or "")).encode()).hexdigest() + ".json")
-        if os.path.exists(path) and time.time() - os.path.getmtime(path) < CACHE_TTL:
-            with open(path, encoding="utf-8") as fh:
-                cached: dict[str, Any] = json.load(fh)
-            return cached
-        if self.offline:
-            return {"ok": False, "status": None, "error": "offline", "body": "", "final_url": url}
+        with self._cache_lock(path):
+            if os.path.exists(path) and time.time() - os.path.getmtime(path) < CACHE_TTL:
+                with open(path, encoding="utf-8") as fh:
+                    cached: dict[str, Any] = json.load(fh)
+                return cached
+            if self.offline:
+                return {"ok": False, "status": None, "error": "offline", "body": "",
+                        "final_url": url}
 
-        gap = self.delay - (time.time() - self.last)
-        if gap > 0:
-            time.sleep(gap)
-        self.last = time.time()
+            self._wait_for_host(url)
 
-        ua = UA if not self.mailto else f"{UA} mailto:{self.mailto}"
-        req = urllib.request.Request(url, headers={
-            "User-Agent": ua,
-            "Accept": accept or "text/html,application/json;q=0.9,*/*;q=0.8",
-        })
-        rec: dict[str, Any]
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                raw = resp.read(max_bytes)
-                charset = resp.headers.get_content_charset() or "utf-8"
-                rec = {"ok": True, "status": resp.status,
-                       "body": raw.decode(charset, "replace"),
-                       "final_url": resp.geturl(), "error": None}
-        except urllib.error.HTTPError as e:
-            rec = {"ok": False, "status": e.code, "body": "", "final_url": url,
-                   "error": f"HTTP {e.code}"}
-        except Exception as e:                          # timeouts, DNS, TLS, redirect loops
-            reason = getattr(e, "reason", None)
-            rec = {"ok": False, "status": None, "body": "", "final_url": url,
-                   "error": f"{type(e).__name__}: {e}",
-                   # A name that does not resolve is a dead link. A timeout is
-                   # our problem, not the link's.
-                   "transient": not isinstance(reason, socket.gaierror)}
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(rec, fh)
-        return rec
+            ua = UA if not self.mailto else f"{UA} mailto:{self.mailto}"
+            req = urllib.request.Request(url, headers={
+                "User-Agent": ua,
+                "Accept": accept or "text/html,application/json;q=0.9,*/*;q=0.8",
+            })
+            rec: dict[str, Any]
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    raw = resp.read(max_bytes)
+                    charset = resp.headers.get_content_charset() or "utf-8"
+                    rec = {"ok": True, "status": resp.status,
+                           "body": raw.decode(charset, "replace"),
+                           "final_url": resp.geturl(), "error": None}
+            except urllib.error.HTTPError as e:
+                rec = {"ok": False, "status": e.code, "body": "", "final_url": url,
+                       "error": f"HTTP {e.code}"}
+            except Exception as e:                      # timeouts, DNS, TLS, redirect loops
+                reason = getattr(e, "reason", None)
+                rec = {"ok": False, "status": None, "body": "", "final_url": url,
+                       "error": f"{type(e).__name__}: {e}",
+                       # A name that does not resolve is a dead link. A timeout is
+                       # our problem, not the link's.
+                       "transient": not isinstance(reason, socket.gaierror)}
+            temp = f"{path}.{threading.get_ident()}.tmp"
+            try:
+                with open(temp, "w", encoding="utf-8") as fh:
+                    json.dump(rec, fh)
+                os.replace(temp, path)
+            finally:
+                if os.path.exists(temp):
+                    os.remove(temp)
+            return rec
 
     def json(self, url: str) -> tuple[Any | None, str | None]:
         """(parsed body, the reason the lookup did not happen).
@@ -1666,8 +1705,14 @@ def main() -> int:
         for i, r in enumerate(refs, 1):
             print(f"[{i}/{len(refs)}] {ref_label(r)} …",
                   file=sys.stderr, flush=True)
-            verify(r, f)
-            print(f"    {r.status}", file=sys.stderr, flush=True)
+        if refs:
+            workers = min(8, len(refs))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [pool.submit(verify, r, f) for r in refs]
+                for i, (r, future) in enumerate(zip(refs, futures, strict=True), 1):
+                    future.result()
+                    print(f"    [{i}/{len(refs)}] {r.status}",
+                          file=sys.stderr, flush=True)
         out = build_report(refs, cites, args.doc, args.offline, style,
                            args.style != "auto", polite=bool(args.mailto))
         if args.json_out:
