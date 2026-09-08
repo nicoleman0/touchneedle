@@ -8,8 +8,11 @@ import hashlib
 import json
 import os
 import tempfile
+import threading
 import time
 import unittest
+from email.message import Message
+from unittest import mock
 
 from context import cc
 
@@ -367,6 +370,104 @@ class TestFetcherCache(unittest.TestCase):
     def test_the_user_agent_carries_the_version_and_a_contact_url(self):
         self.assertIn(cc.__version__, cc.UA)
         self.assertIn("http", cc.UA)
+
+    def test_rate_limit_is_per_host(self):
+        f = cc.Fetcher(self.dir, delay=0.4)
+        with mock.patch.object(cc.time, "monotonic", side_effect=[100.0, 100.0,
+                                                                     100.0, 100.0,
+                                                                     100.1, 100.1]), \
+             mock.patch.object(cc.time, "sleep") as sleep:
+            f._wait_for_host("https://api.crossref.org/works/one")
+            f._wait_for_host("https://api.openalex.org/works/one")
+            f._wait_for_host("https://api.crossref.org/works/two")
+        sleep.assert_called_once_with(mock.ANY)
+        self.assertAlmostEqual(sleep.call_args.args[0], 0.3, places=6)
+
+    def test_concurrent_same_url_has_one_request_and_a_valid_cache(self):
+        calls = 0
+        calls_lock = threading.Lock()
+
+        class Response:
+            status = 200
+            headers = Message()
+
+            def read(self, _max_bytes):
+                return b"<html></html>"
+
+            def geturl(self):
+                return "https://example.com/same"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+        def open_url(_request, timeout):
+            nonlocal calls
+            self.assertEqual(timeout, 25)
+            with calls_lock:
+                calls += 1
+            time.sleep(0.05)
+            return Response()
+
+        f = cc.Fetcher(self.dir, delay=0)
+        with (mock.patch.object(cc.urllib.request, "urlopen", side_effect=open_url),
+              cc.concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool):
+            results = list(pool.map(lambda _: f.get("https://example.com/same"), range(2)))
+
+        self.assertEqual(calls, 1)
+        self.assertTrue(all(result["ok"] for result in results))
+        self.assertEqual(f.get("https://example.com/same")["body"], "<html></html>")
+
+    def test_different_hosts_can_reach_the_opener_together(self):
+        opened = []
+        opened_lock = threading.Lock()
+        reached_together = threading.Barrier(2)
+        barrier_passes = 0
+        passes_lock = threading.Lock()
+
+        class Response:
+            status = 200
+            headers = Message()
+
+            def __init__(self, url):
+                self.url = url
+
+            def read(self, _max_bytes):
+                return b"ok"
+
+            def geturl(self):
+                return self.url
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+        def open_url(request, timeout):
+            nonlocal barrier_passes
+            self.assertEqual(timeout, 25)
+            with opened_lock:
+                opened.append(request.full_url)
+            try:
+                reached_together.wait(timeout=0.1)
+            except threading.BrokenBarrierError:
+                pass
+            else:
+                with passes_lock:
+                    barrier_passes += 1
+            return Response(request.full_url)
+
+        f = cc.Fetcher(self.dir, delay=0.2)
+        with (mock.patch.object(cc.urllib.request, "urlopen", side_effect=open_url),
+              cc.concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool):
+            results = list(pool.map(f.get, ["https://one.example/a", "https://two.example/b"]))
+
+        self.assertEqual(len(opened), 2)
+        self.assertEqual(barrier_passes, 2)
+        self.assertTrue(all(result["ok"] for result in results))
 
 
 if __name__ == "__main__":

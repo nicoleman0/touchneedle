@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Verification now processes independent references through a modest thread
+  pool. The HTTP cache is safe under concurrent access, and the 0.4-second
+  politeness delay is enforced per host, so Crossref, OpenAlex, arXiv and
+  publisher sites no longer queue behind one another.
+
 ## [0.3.0] — 2026-08-31
 
 Windows. A reference list carrying a name outside the console's code page

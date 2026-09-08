@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -294,6 +295,43 @@ class TestExitCodes(unittest.TestCase):
                  mock.patch.object(sys, "argv", argv), \
                  contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(cc.main(), 2)
+
+    def test_references_are_verified_concurrently_but_reported_in_order(self):
+        refs = [
+            cc.parse_entry("First, A. (2020) 'First paper', Journal of Things."),
+            cc.parse_entry("Second, B. (2021) 'Second paper', Journal of Things."),
+        ]
+        met = threading.Barrier(2)
+        second_done = threading.Event()
+        completed = []
+
+        def fake_verify(ref, fetcher):
+            met.wait(timeout=1)
+            if ref is refs[0]:
+                self.assertTrue(second_done.wait(timeout=1))
+            else:
+                ref.status = "VERIFIED"
+                completed.append(ref.name)
+                second_done.set()
+                return
+            ref.status = "VERIFIED"
+            completed.append(ref.name)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            argv = ["touchneedle.py", "check", "doc.md", "--out",
+                    os.path.join(tmp, "report.md"), "--cache",
+                    os.path.join(tmp, "cache")]
+            stderr = io.StringIO()
+            with mock.patch.object(cc, "collect", return_value=(refs, [], "author-date")), \
+                 mock.patch.object(cc, "verify", fake_verify), \
+                 mock.patch.object(sys, "argv", argv), \
+                 contextlib.redirect_stderr(stderr):
+                self.assertEqual(cc.main(), 0)
+
+        self.assertEqual(completed, ["Second", "First"])
+        progress = stderr.getvalue()
+        self.assertLess(progress.index("    [1/2] VERIFIED"),
+                        progress.index("    [2/2] VERIFIED"))
 
     def test_an_unreadable_document_fails_loudly(self):
         proc = run("check", os.path.join(FIXTURES, "does-not-exist.md"), "--offline")

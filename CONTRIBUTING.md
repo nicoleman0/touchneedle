@@ -118,7 +118,9 @@ title, author and year comparison stay consistent across sources.
 
 Please add fixture-backed tests for the new routing, and be a good citizen of
 whatever API you are calling: it goes through `Fetcher`, which caches for seven
-days and rate-limits to one request every 0.4 s.
+days and rate-limits each host to one request every 0.4 s. Verification uses a
+small pool across independent references, so a slow authority does not hold up
+unrelated hosts.
 
 ## Changing the parser
 
