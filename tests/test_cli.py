@@ -402,7 +402,57 @@ Sørensen, K. (2021) 'Målinger og resultater', Nordic Journal of Measurement, 4
             self.assertIn("Müller", proc.stdout)
 
 
+class TestHtmlAndEpubNeedPandoc(unittest.TestCase):
+    """Issue #50: .html and .epub take the pandoc route, not raw UTF-8."""
 
+    def test_an_epub_without_pandoc_uses_the_existing_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            epub = os.path.join(tmp, "refs.epub")
+            with open(epub, "wb") as fh:
+                fh.write(b"PK\x03\x04not-a-real-epub")
+            with mock.patch.object(cc.shutil, "which", return_value=None):
+                with self.assertRaises(SystemExit) as cm:
+                    cc.load_text(epub)
+        self.assertIn("needs pandoc to convert", str(cm.exception))
+
+    def test_an_html_file_without_pandoc_uses_the_existing_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            html = os.path.join(tmp, "refs.html")
+            with open(html, "w", encoding="utf-8") as fh:
+                fh.write("<p>Smith, J. (2020) 'A paper'.</p>")
+            with mock.patch.object(cc.shutil, "which", return_value=None):
+                with self.assertRaises(SystemExit) as cm:
+                    cc.load_text(html)
+        self.assertIn("needs pandoc to convert", str(cm.exception))
+
+
+@unittest.skipUnless(shutil.which("pandoc"), "pandoc is not installed")
+class TestHtmlAndEpubConvertThroughPandoc(unittest.TestCase):
+    """Issue #50: both extensions convert through the existing pandoc command."""
+
+    SOURCE = TestAConvertedDocumentKeepsItsAccents.SOURCE
+
+    def test_an_html_file_is_read_through_pandoc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            md = os.path.join(tmp, "doc.md")
+            html = os.path.join(tmp, "doc.html")
+            with open(md, "w", encoding="utf-8") as fh:
+                fh.write(self.SOURCE)
+            subprocess.run(["pandoc", md, "-o", html], check=True, capture_output=True)
+            proc = run("check", html, "--offline")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("Müller", proc.stdout)
+
+    def test_an_epub_is_read_through_pandoc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            md = os.path.join(tmp, "doc.md")
+            epub = os.path.join(tmp, "doc.epub")
+            with open(md, "w", encoding="utf-8") as fh:
+                fh.write(self.SOURCE)
+            subprocess.run(["pandoc", md, "-o", epub], check=True, capture_output=True)
+            proc = run("check", epub, "--offline")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("Müller", proc.stdout)
 
 
 if __name__ == "__main__":

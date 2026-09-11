@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `.html` and `.epub` documents convert through the same pandoc path as
+  `.docx`, `.odt` and `.rtf`. Without pandoc they exit with the existing
+  "needs pandoc to convert" message instead of reading HTML as Markdown or
+  raising a decode error on the zip.
+
 ### Changed
 
 - Verification now processes independent references through a modest thread
