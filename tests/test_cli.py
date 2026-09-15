@@ -405,5 +405,42 @@ Sørensen, K. (2021) 'Målinger og resultater', Nordic Journal of Measurement, 4
 
 
 
+    def test_an_html_file_is_converted_through_pandoc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            md = os.path.join(tmp, "doc.md")
+            html = os.path.join(tmp, "doc.html")
+            with open(md, "w", encoding="utf-8") as fh:
+                fh.write(self.SOURCE)
+            subprocess.run(["pandoc", md, "-o", html], check=True, capture_output=True)
+            proc = run("check", html, "--offline")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("Müller", proc.stdout)
+
+    def test_an_epub_is_converted_through_pandoc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            md = os.path.join(tmp, "doc.md")
+            epub = os.path.join(tmp, "doc.epub")
+            with open(md, "w", encoding="utf-8") as fh:
+                fh.write(self.SOURCE)
+            subprocess.run(["pandoc", md, "-o", epub], check=True, capture_output=True)
+            proc = run("check", epub, "--offline")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("Müller", proc.stdout)
+
+
+class TestEpubWithoutPandocDoesNotTraceback(unittest.TestCase):
+    """Issue #50: a missing pandoc must not decode an .epub as UTF-8 text."""
+
+    def test_epub_without_pandoc_uses_the_existing_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            epub = os.path.join(tmp, "doc.epub")
+            with open(epub, "wb") as fh:
+                fh.write(b"PK\x03\x04not-valid-utf8\xff\xfe")
+            with mock.patch.object(cc.shutil, "which", return_value=None):
+                with self.assertRaises(SystemExit) as raised:
+                    cc.load_text(epub)
+            self.assertIn("needs pandoc to convert", str(raised.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -67,8 +67,8 @@ PROBLEM_STATUSES = {"MISMATCH", "NOT_FOUND", "LINK_DEAD", "STALE"}
 # --------------------------------------------------------------------------
 
 def load_text(path: str) -> str:
-    """Return document text as Markdown, converting .docx through pandoc."""
-    if path.lower().endswith((".docx", ".odt", ".rtf")):
+    """Return document text as Markdown, converting office/HTML/EPUB through pandoc."""
+    if path.lower().endswith((".docx", ".odt", ".rtf", ".html", ".htm", ".epub")):
         if not shutil.which("pandoc"):
             sys.exit(f"error: {path} needs pandoc to convert, and pandoc is not on PATH")
         out = subprocess.run(
