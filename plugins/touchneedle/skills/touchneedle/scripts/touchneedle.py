@@ -67,8 +67,8 @@ PROBLEM_STATUSES = {"MISMATCH", "NOT_FOUND", "LINK_DEAD", "STALE"}
 # --------------------------------------------------------------------------
 
 def load_text(path: str) -> str:
-    """Return document text as Markdown, converting office and web formats through pandoc."""
-    if path.lower().endswith((".docx", ".odt", ".rtf", ".html", ".epub")):
+    """Return document text as Markdown, converting office/HTML/EPUB through pandoc."""
+    if path.lower().endswith((".docx", ".odt", ".rtf", ".html", ".htm", ".epub")):
         if not shutil.which("pandoc"):
             sys.exit(f"error: {path} needs pandoc to convert, and pandoc is not on PATH")
         out = subprocess.run(
@@ -1678,7 +1678,7 @@ def main() -> int:
 
     for name in ("check", "claims"):
         p = sub.add_parser(name)
-        p.add_argument("doc", help="Markdown, .docx, .odt, .rtf, .html or .epub document")
+        p.add_argument("doc", help="Markdown or .docx document")
         p.add_argument("--out", help="write the report here instead of stdout")
         p.add_argument("--style", default="auto", choices=["auto", *STYLES],
                        help="citation style of the document; the default, auto, "
