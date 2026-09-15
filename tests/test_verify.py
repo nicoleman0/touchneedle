@@ -159,11 +159,15 @@ class TestOutagesAreNotFindings(unittest.TestCase):
         import urllib.parse
         return f"https://api.crossref.org/works/{urllib.parse.quote(doi)}"
 
+    def http_error(self, url, status):
+        return cc.urllib.error.HTTPError(url, status, f"HTTP {status}", Message(), None)
+
     def test_a_rate_limited_crossref_does_not_condemn_the_doi(self):
         r = ref("Smith, J. (2020) 'A paper', Journal of Things. doi:10.1145/1234")
-        with tempfile.TemporaryDirectory() as tmp:
-            self.plant(tmp, self.crossref_url(r.doi), ok=False, status=429,
-                       error="HTTP 429")
+        url = self.crossref_url(r.doi)
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(cc.urllib.request, "urlopen",
+                               side_effect=self.http_error(url, 429)):
             verdict = cc.verify_doi(r, cc.Fetcher(tmp))
         self.assertFalse(verdict)                 # no verdict, next route gets a turn
         self.assertNotEqual(r.status, "NOT_FOUND")
@@ -190,9 +194,10 @@ class TestOutagesAreNotFindings(unittest.TestCase):
                            {"title": ["Something else entirely"],
                             "author": [{"given": "A", "family": "Other"}],
                             "issued": {"date-parts": [[2024]]}, "DOI": "10.1/x"}]}}))
-            self.plant(tmp, f"https://api.openalex.org/works?per-page=5&filter=title.search:{q}",
-                       ok=False, status=429, error="HTTP 429")
-            verdict = cc.verify_by_title(r, cc.Fetcher(tmp))
+            openalex_url = f"https://api.openalex.org/works?per-page=5&filter=title.search:{q}"
+            with mock.patch.object(cc.urllib.request, "urlopen",
+                                   side_effect=self.http_error(openalex_url, 429)):
+                verdict = cc.verify_by_title(r, cc.Fetcher(tmp))
         self.assertFalse(verdict)
         self.assertNotEqual(r.status, "NOT_FOUND")
         self.assertTrue(any("OpenAlex" in n and "429" in n for n in r.notes), r.notes)
@@ -217,15 +222,16 @@ class TestOutagesAreNotFindings(unittest.TestCase):
         import urllib.parse
         r = ref()
         q = urllib.parse.quote(r.title[:250])
+        crossref_url = f"https://api.crossref.org/works?query.bibliographic={q}&rows=5"
         with tempfile.TemporaryDirectory() as tmp:
-            self.plant(tmp, f"https://api.crossref.org/works?query.bibliographic={q}&rows=5",
-                       ok=False, status=429, error="HTTP 429")
             self.plant(tmp, f"https://api.openalex.org/works?per-page=5&filter=title.search:{q}",
                        body=json.dumps({"results": [
                            {"display_name": r.title,
                             "authorships": [{"author": {"display_name": "Jane Smith"}}],
                             "publication_year": 2015}]}))
-            cc.verify_by_title(r, cc.Fetcher(tmp))
+            with mock.patch.object(cc.urllib.request, "urlopen",
+                                   side_effect=self.http_error(crossref_url, 429)):
+                cc.verify_by_title(r, cc.Fetcher(tmp))
         self.assertNotIn(r.status, cc.PROBLEM_STATUSES)
         self.assertTrue(any("reprint or a duplicate record" in n for n in r.notes), r.notes)
         self.assertTrue(any("could not search Crossref" in n for n in r.notes), r.notes)
@@ -233,12 +239,9 @@ class TestOutagesAreNotFindings(unittest.TestCase):
     def test_a_timeout_does_not_make_a_link_dead(self):
         r = cc.parse_entry("Example Corp (2024) 'A post'. "
                            "Available at: https://example.com/post")
-        with tempfile.TemporaryDirectory() as tmp:
-            key = hashlib.sha256(b"https://example.com/post").hexdigest() + ".json"
-            with open(os.path.join(tmp, key), "w", encoding="utf-8") as fh:
-                json.dump({"ok": False, "status": None, "body": "",
-                           "final_url": r.url, "error": "TimeoutError: timed out",
-                           "transient": True}, fh)
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(cc.urllib.request, "urlopen",
+                               side_effect=TimeoutError("timed out")):
             cc.verify_web(r, cc.Fetcher(tmp))
         self.assertEqual(r.status, "UNVERIFIABLE")
 
@@ -332,13 +335,17 @@ class TestFetcherCache(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.dir = self.tmp.name
 
-    def plant(self, url, accept=None, body="cached body", age=0):
+    def plant(self, url, accept=None, body="cached body", age=0, *,
+              ok=True, status=200, error=None, transient=None):
         key = hashlib.sha256((url + (accept or "")).encode()).hexdigest() + ".json"
         path = os.path.join(self.dir, key)
         os.makedirs(self.dir, exist_ok=True)
+        rec = {"ok": ok, "status": status, "body": body,
+               "final_url": url, "error": error}
+        if transient is not None:
+            rec["transient"] = transient
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump({"ok": True, "status": 200, "body": body,
-                       "final_url": url, "error": None}, fh)
+            json.dump(rec, fh)
         if age:
             os.utime(path, (time.time() - age, time.time() - age))
         return path
@@ -366,6 +373,37 @@ class TestFetcherCache(unittest.TestCase):
         rec = cc.Fetcher(self.dir, offline=True).get("https://example.com/x")
         self.assertFalse(rec["ok"])
         self.assertEqual(rec["error"], "offline")
+
+    def test_transient_cached_failure_is_retried(self):
+        url = "https://example.com/transient"
+        self.plant(url, ok=False, status=429, error="HTTP 429")
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = b"fresh"
+        response.headers = Message()
+        response.status = 200
+        response.geturl.return_value = url
+        with mock.patch.object(cc.urllib.request, "urlopen", return_value=response) as opener:
+            rec = cc.Fetcher(self.dir, delay=0).get(url)
+        opener.assert_called_once()
+        self.assertTrue(rec["ok"])
+        self.assertEqual(rec["body"], "fresh")
+
+    def test_definitive_absence_remains_cached(self):
+        url = "https://example.com/gone"
+        self.plant(url, ok=False, status=404, error="HTTP 404")
+        with mock.patch.object(cc.urllib.request, "urlopen") as opener:
+            rec = cc.Fetcher(self.dir, delay=0).get(url)
+        opener.assert_not_called()
+        self.assertEqual(rec["status"], 404)
+
+    def test_transient_failure_is_not_written(self):
+        url = "https://example.com/unavailable"
+        error = cc.urllib.error.HTTPError(url, 503, "Service Unavailable", Message(), None)
+        with mock.patch.object(cc.urllib.request, "urlopen", side_effect=error):
+            rec = cc.Fetcher(self.dir, delay=0).get(url)
+        self.assertTrue(cc.lookup_failed(rec))
+        self.assertEqual(os.listdir(self.dir), [])
 
     def test_the_user_agent_carries_the_version_and_a_contact_url(self):
         self.assertIn(cc.__version__, cc.UA)

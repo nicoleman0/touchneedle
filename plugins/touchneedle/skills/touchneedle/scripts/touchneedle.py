@@ -983,7 +983,8 @@ class Fetcher:
             if os.path.exists(path) and time.time() - os.path.getmtime(path) < CACHE_TTL:
                 with open(path, encoding="utf-8") as fh:
                     cached: dict[str, Any] = json.load(fh)
-                return cached
+                if not lookup_failed(cached):
+                    return cached
             if self.offline:
                 return {"ok": False, "status": None, "error": "offline", "body": "",
                         "final_url": url}
@@ -1013,14 +1014,15 @@ class Fetcher:
                        # A name that does not resolve is a dead link. A timeout is
                        # our problem, not the link's.
                        "transient": not isinstance(reason, socket.gaierror)}
-            temp = f"{path}.{threading.get_ident()}.tmp"
-            try:
-                with open(temp, "w", encoding="utf-8") as fh:
-                    json.dump(rec, fh)
-                os.replace(temp, path)
-            finally:
-                if os.path.exists(temp):
-                    os.remove(temp)
+            if not lookup_failed(rec):
+                temp = f"{path}.{threading.get_ident()}.tmp"
+                try:
+                    with open(temp, "w", encoding="utf-8") as fh:
+                        json.dump(rec, fh)
+                    os.replace(temp, path)
+                finally:
+                    if os.path.exists(temp):
+                        os.remove(temp)
             return rec
 
     def json(self, url: str) -> tuple[Any | None, str | None]:
