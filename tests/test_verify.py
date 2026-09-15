@@ -254,6 +254,52 @@ class TestOutagesAreNotFindings(unittest.TestCase):
         self.assertEqual(r.status, "LINK_DEAD")
 
 
+class TestWebVerification(unittest.TestCase):
+    def verify_page_title(self, page_title):
+        r = cc.parse_entry(
+            "Example Corp (2024) 'A useful article'. "
+            "Available at: https://example.com/article"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            key = hashlib.sha256(r.url.encode()).hexdigest() + ".json"
+            with open(os.path.join(tmp, key), "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "ok": True,
+                        "status": 200,
+                        "body": f"<html><title>{page_title}</title></html>",
+                        "final_url": r.url,
+                        "error": None,
+                    },
+                    fh,
+                )
+            cc.verify_web(r, cc.Fetcher(tmp))
+        return r
+
+    def test_bot_interstitial_titles_are_partial_not_mismatches(self):
+        titles = (
+            "Just a moment…",
+            "Attention Required! | Cloudflare",
+            "Checking your browser",
+            "Access denied",
+            "403 Forbidden",
+            "Are you a robot?",
+            "Security check",
+            "Please enable JavaScript",
+        )
+        for title in titles:
+            with self.subTest(title=title):
+                r = self.verify_page_title(title)
+                self.assertEqual(r.status, "PARTIAL")
+                self.assertTrue(any("block" in note.lower() for note in r.notes), r.notes)
+                self.assertTrue(any(title.lower() in note.lower() for note in r.notes), r.notes)
+
+    def test_genuine_page_title_mismatch_stays_a_mismatch(self):
+        r = self.verify_page_title("Completely unrelated publication")
+        self.assertEqual(r.status, "MISMATCH")
+        self.assertTrue(any("mismatch" in note.lower() for note in r.notes), r.notes)
+
+
 class TestSearchCandidates(unittest.TestCase):
     """A title search returns candidates, not the cited work. Only a candidate
     confident enough to *be* the work earns a metadata comparison."""
