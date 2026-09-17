@@ -1323,6 +1323,10 @@ TITLE_TAG = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 OG_TITLE = re.compile(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\'](.*?)["\']', re.I)
 SOFT_404 = re.compile(r"\b(404|not found|page (?:not|no longer) (?:found|available)|"
                       r"deleted|does not exist)\b", re.I)
+BLOCK_INTERSTITIAL = re.compile(
+    r"\b(just a moment|attention required|checking your browser|access denied|"
+    r"403 forbidden|are you a robot|security check|please enable javascript)\b", re.I
+)
 
 
 def verify_web(ref: Reference, f: Fetcher) -> bool:
@@ -1359,6 +1363,14 @@ def verify_web(ref: Reference, f: Fetcher) -> bool:
     if page_title and SOFT_404.search(page_title):
         ref.status = "LINK_DEAD"
         ref.notes.append(f"page resolves but looks like an error page: \u201c{page_title}\u201d")
+        return True
+
+    if page_title and BLOCK_INTERSTITIAL.search(page_title):
+        ref.status = "PARTIAL"
+        ref.notes.append(
+            f"page resolves but a bot/security block prevented reading the article: "
+            f"\u201c{page_title}\u201d; confirm by eye"
+        )
         return True
 
     if not page_title:
