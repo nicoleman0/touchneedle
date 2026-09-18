@@ -25,8 +25,8 @@ cross-reference pass in both directions. Exit status is 2 when something needs
 attention and 0 when the list is clean, so the same command drops into CI
 unchanged.
 
-Nothing is needed beyond Python 3.11+. `pandoc` has to be on PATH for `.docx`
-input, and for nothing else.
+Nothing is needed beyond Python 3.11+. `pandoc` has to be on PATH for `.docx`,
+`.odt`, `.rtf`, `.html` and `.epub` input, and for nothing else.
 
 ## Why not a .bib checker
 
@@ -35,8 +35,8 @@ databases. That covers journal articles but misses standards,
 specifications, vendor documentation, and blog posts. In a lot of real
 bibliographies, this is half the list.
 
-So this tool parses a **prose reference list** straight out of Markdown or
-`.docx`, in the four style families a real document uses — author-date
+So this tool parses a **prose reference list** straight out of Markdown,
+`.docx`, `.html` or `.epub`, in the four style families a real document uses — author-date
 (Harvard, APA, Chicago author-date), numeric (IEEE, Vancouver/AMA), MLA, and
 footnote styles (Chicago notes, MHRA) — and routes each entry to whichever
 authority can actually confirm it. The style is auto-detected, or forced with
