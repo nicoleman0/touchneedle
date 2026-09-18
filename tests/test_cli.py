@@ -436,9 +436,8 @@ class TestEpubWithoutPandocDoesNotTraceback(unittest.TestCase):
             epub = os.path.join(tmp, "doc.epub")
             with open(epub, "wb") as fh:
                 fh.write(b"PK\x03\x04not-valid-utf8\xff\xfe")
-            with mock.patch.object(cc.shutil, "which", return_value=None):
-                with self.assertRaises(SystemExit) as raised:
-                    cc.load_text(epub)
+            with mock.patch.object(cc.shutil, "which", return_value=None), self.assertRaises(SystemExit) as raised:
+                cc.load_text(epub)
             self.assertIn("needs pandoc to convert", str(raised.exception))
 
 
