@@ -33,7 +33,7 @@ Each object in `references` contains these fields:
 | `unchecked` | Whether the result could not be checked because an authority was unavailable. |
 | `notes` | Explanations and follow-up details. |
 | `evidence` | Sources or records used during verification. |
-| `cited_by` | Citation keys or numbers that refer to this reference. |
+| `cited_by` | Forms of citations that matched this reference, such as `parenthetical` or `numeric`. |
 
 ## Citation entries
 
